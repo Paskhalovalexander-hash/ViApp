@@ -85,9 +85,62 @@ fun ChatBubble(
     }
 }
 
+/**
+ * Контент плитки чата — только список сообщений (без блока ввода).
+ * Блок ввода вынесен отдельно в ChatInputBlock для фиксированной позиции.
+ */
 @Composable
 fun BottomTileContent(
     messages: List<ChatMessage>,
+    isCollapsed: Boolean = false,
+    bottomPadding: Dp = 0.dp,
+    modifier: Modifier = Modifier
+) {
+    TileBackground()
+
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.size - 1)
+        }
+    }
+
+    // Контент чата — только когда раскрыто
+    if (!isCollapsed) {
+        Column(
+            modifier = modifier
+                .fillMaxSize()
+                .padding(horizontal = DesignTokens.tilePadding, vertical = 4.dp)
+        ) {
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .weight(1f)
+                    .fillMaxWidth(),
+                contentPadding = PaddingValues(
+                    top = 4.dp,
+                    bottom = DesignTokens.chatInputBlockHeight + 32.dp + bottomPadding
+                ),
+                verticalArrangement = Arrangement.Bottom
+            ) {
+                items(
+                    items = messages,
+                    key = { msg -> "${msg.role}-${msg.text.hashCode()}" }
+                ) { message ->
+                    ChatBubble(message = message)
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Блок ввода сообщения — вынесен отдельно для фиксированной позиции внизу экрана.
+ * Не движется вместе с плиткой чата при анимации.
+ */
+@Composable
+fun ChatInputBlock(
     onSendMessage: (String) -> Unit,
     isLoading: Boolean = false,
     isCollapsed: Boolean = false,
@@ -96,10 +149,7 @@ fun BottomTileContent(
     modifier: Modifier = Modifier
 ) {
     val scheme = LocalAppColorScheme.current
-    TileBackground()
-
     var inputText by remember { mutableStateOf("") }
-    val listState = rememberLazyListState()
     
     // Фокус и клавиатура — автоматически при раскрытии
     val focusRequester = remember { FocusRequester() }
@@ -113,16 +163,6 @@ fun BottomTileContent(
         }
     }
 
-    // HazeState для размытия сообщений чата за блоком ввода
-    val chatHazeState = rememberHazeState()
-    val supportsBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-
-    // Параметры blur
-    val blurRadius = DesignTokens.blurRadiusLight
-    val glassTint = scheme.glassTint
-    val glassNoise = DesignTokens.glassNoise
-    val glassTintAlpha = DesignTokens.glassTintAlpha
-
     val inputShape = RoundedCornerShape(DesignTokens.chatInputBlockCornerRadius)
     val sendButtonShape = RoundedCornerShape(DesignTokens.chatInputBlockHeight / 2)
 
@@ -134,155 +174,91 @@ fun BottomTileContent(
         )
     )
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
-        }
-    }
-
     Box(
-        modifier = modifier.fillMaxSize(),
-        contentAlignment = if (isCollapsed) Alignment.Center else Alignment.TopStart
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = DesignTokens.tilePadding)
+            .padding(bottom = (10.dp + bottomPadding).coerceAtLeast(24.dp))
+            .height(DesignTokens.chatInputBlockHeight)
+            .clip(inputShape)
+            .background(scheme.chatInputBlockBackground, inputShape)
+            .border(DesignTokens.tileBorderWidth, gradientBorder, inputShape)
     ) {
-        // Контент чата — источник для размытия (скрыт когда свёрнуто)
-        if (!isCollapsed) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .hazeSource(chatHazeState)
-                    .padding(horizontal = DesignTokens.tilePadding, vertical = 4.dp)
-            ) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxWidth(),
-                    contentPadding = PaddingValues(
-                        top = 4.dp,
-                        bottom = DesignTokens.chatInputBlockHeight + 20.dp + bottomPadding // 10dp отступ от строки ввода
-                    ),
-                    // Сообщения прижаты к низу — новые внизу, старые поднимаются вверх
-                    verticalArrangement = Arrangement.Bottom
-                ) {
-                    items(
-                        items = messages,
-                        key = { msg -> "${msg.role}-${msg.text.hashCode()}" }
-                    ) { message ->
-                        ChatBubble(message = message)
-                    }
-                }
-            }
-        }
-
-        // Блок ввода с glassmorphism — поверх списка сообщений (или по центру когда свёрнуто)
-        // Кнопка отправки встроена внутрь поля ввода справа
-        Box(
+        Row(
             modifier = Modifier
-                .fillMaxWidth()
-                .then(
-                    if (isCollapsed) {
-                        Modifier
-                            .padding(horizontal = DesignTokens.tilePadding)
-                            .padding(bottom = 10.dp + bottomPadding)
-                    } else {
-                        Modifier
-                            .align(Alignment.BottomCenter)
-                            .padding(horizontal = DesignTokens.tilePadding)
-                            // Гарантированный отступ от навигации Android
-                            .padding(bottom = (10.dp + bottomPadding).coerceAtLeast(24.dp))
-                    }
-                )
-                .height(DesignTokens.chatInputBlockHeight)
-                .clip(inputShape)
-                .then(
-                    if (supportsBlur && !isCollapsed) {
-                        Modifier.hazeEffect(state = chatHazeState) {
-                            this.blurRadius = blurRadius
-                            tints = listOf(HazeTint(glassTint.copy(alpha = glassTintAlpha)))
-                            noiseFactor = glassNoise
-                        }
-                    } else {
-                        Modifier.background(scheme.chatInputBlockBackground, inputShape)
-                    }
-                )
-                .border(DesignTokens.tileBorderWidth, gradientBorder, inputShape)
+                .fillMaxSize()
+                .padding(start = 16.dp, end = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(start = 16.dp, end = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Поле ввода
-                BasicTextField(
-                    value = inputText,
-                    onValueChange = { inputText = it.replace("\n", "") },
-                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                    keyboardActions = KeyboardActions(
-                        onSend = {
-                            val text = inputText.trim()
-                            if (text.isNotEmpty()) {
-                                onSendMessage(text)
-                                inputText = ""
-                            }
-                        }
-                    ),
-                    modifier = Modifier
-                        .weight(1f)
-                        .focusRequester(focusRequester),
-                    enabled = !isCollapsed, // Отключаем ввод когда свёрнуто
-                    textStyle = TextStyle(
-                        color = scheme.textColor,
-                        fontFamily = DesignTokens.fontFamilyPlank,
-                        fontWeight = FontWeight.Thin,
-                        fontSize = DesignTokens.fontSizeInput
-                    ),
-                    singleLine = true,
-                    decorationBox = { inner ->
-                        Box(
-                            contentAlignment = Alignment.CenterStart,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            if (inputText.isEmpty()) {
-                                Text(
-                                    text = "Сообщение...",
-                                    color = scheme.textColor.copy(alpha = 0.5f),
-                                    fontFamily = DesignTokens.fontFamilyPlank,
-                                    fontWeight = FontWeight.Thin,
-                                    fontSize = DesignTokens.fontSizeInput
-                                )
-                            }
-                            inner()
-                        }
-                    }
-                )
-
-                // Кнопка отправки — встроена внутрь поля ввода справа
-                Box(
-                    modifier = Modifier
-                        .size(DesignTokens.chatInputBlockHeight - 12.dp)
-                        .clip(sendButtonShape)
-                        .background(scheme.chatBubbleUserBackground.copy(alpha = 0.5f))
-                        .clickable(enabled = !isLoading && !isCollapsed) {
-                            val text = inputText.trim()
-                            if (text.isEmpty()) return@clickable
+            // Поле ввода
+            BasicTextField(
+                value = inputText,
+                onValueChange = { inputText = it.replace("\n", "") },
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
+                keyboardActions = KeyboardActions(
+                    onSend = {
+                        val text = inputText.trim()
+                        if (text.isNotEmpty()) {
                             onSendMessage(text)
                             inputText = ""
-                        },
-                    contentAlignment = Alignment.Center
-                ) {
-                    // заглушка под иконку отправки
+                        }
+                    }
+                ),
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focusRequester),
+                enabled = !isCollapsed,
+                textStyle = TextStyle(
+                    color = scheme.textColor,
+                    fontFamily = DesignTokens.fontFamilyPlank,
+                    fontWeight = FontWeight.Thin,
+                    fontSize = DesignTokens.fontSizeInput
+                ),
+                singleLine = true,
+                decorationBox = { inner ->
+                    Box(
+                        contentAlignment = Alignment.CenterStart,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        if (inputText.isEmpty()) {
+                            Text(
+                                text = "Сообщение...",
+                                color = scheme.textColor.copy(alpha = 0.5f),
+                                fontFamily = DesignTokens.fontFamilyPlank,
+                                fontWeight = FontWeight.Thin,
+                                fontSize = DesignTokens.fontSizeInput
+                            )
+                        }
+                        inner()
+                    }
                 }
+            )
+
+            // Кнопка отправки
+            Box(
+                modifier = Modifier
+                    .size(DesignTokens.chatInputBlockHeight - 12.dp)
+                    .clip(sendButtonShape)
+                    .background(scheme.chatBubbleUserBackground.copy(alpha = 0.5f))
+                    .clickable(enabled = !isLoading && !isCollapsed) {
+                        val text = inputText.trim()
+                        if (text.isEmpty()) return@clickable
+                        onSendMessage(text)
+                        inputText = ""
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                // заглушка под иконку отправки
             }
-            
-            // Overlay для перехвата кликов когда плитка свёрнута
-            if (isCollapsed) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .clickable { onExpandRequest() }
-                )
-            }
+        }
+        
+        // Overlay для перехвата кликов когда плитка свёрнута
+        if (isCollapsed) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clickable { onExpandRequest() }
+            )
         }
     }
 }

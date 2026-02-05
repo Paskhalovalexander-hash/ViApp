@@ -74,25 +74,30 @@ fun KbjuTileContent(
     activeTile: TilePosition?,
     userProfile: UserProfile?,
     modifier: Modifier = Modifier,
-    hazeState: HazeState? = null
+    hazeState: HazeState? = null,
+    isActive: Boolean = true
 ) {
     val scheme = LocalAppColorScheme.current
     
     // Отложенный запуск анимации волны для оптимизации первого рендера
+    // Анимации приостанавливаются когда плитка перекрыта (isActive = false)
     var waveAnimationEnabled by remember { mutableStateOf(false) }
-    LaunchedEffect(Unit) {
-        delay(WAVE_ANIMATION_DELAY_MS)
-        waveAnimationEnabled = true
+    LaunchedEffect(isActive) {
+        if (isActive) {
+            delay(WAVE_ANIMATION_DELAY_MS)
+            waveAnimationEnabled = true
+        }
     }
     
     // Фон
     TileBackground()
 
     // Волна заполняет всю область — источник для размытия плашек
+    // Анимация волны приостанавливается когда плитка неактивна
     KbjuWave(
         percent = kcalStat.percent,
         overflow = kcalStat.overflow,
-        animateWave = waveAnimationEnabled,
+        animateWave = waveAnimationEnabled && isActive,
         modifier = Modifier
             .fillMaxSize()
             .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)

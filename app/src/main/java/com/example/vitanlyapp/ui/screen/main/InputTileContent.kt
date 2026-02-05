@@ -63,7 +63,8 @@ fun InputTileContent(
     entries: List<DayEntry> = emptyList(),
     isCollapsed: Boolean = false,
     onEntryClick: (DayEntry) -> Unit = {},
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isActive: Boolean = true
 ) {
     TileBackground()
 

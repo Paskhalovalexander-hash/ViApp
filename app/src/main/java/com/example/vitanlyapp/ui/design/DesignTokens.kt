@@ -171,7 +171,7 @@ object DesignTokens {
     const val tileWeightIdleBottom: Float = 0.18f  // BOTTOM минимальный
 
     // Высота минимальной плитки чата (только строка ввода)
-    val chatTileMinHeight: Dp = 80.dp
+    val chatTileMinHeight: Dp = 92.dp
 
     // Форма нижней плитки — скругление только сверху, снизу уходит за экран
     val bottomTileCornerRadius: Dp = 24.dp

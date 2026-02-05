@@ -7,6 +7,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.core.CubicBezierEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -66,7 +67,7 @@ import dev.chrisbanes.haze.rememberHazeState
 // Плавное замедление в конце: cubic-bezier(0.22, 0.61, 0.36, 1)
 private val smoothEasing = CubicBezierEasing(0.22f, 0.61f, 0.36f, 1f)
 
-private val tileAnimationSpec = tween<Float>(
+private fun <T> tileAnimationSpec() = tween<T>(
     durationMillis = DesignTokens.tileTransitionDurationMs,
     easing = smoothEasing
 )
@@ -163,7 +164,7 @@ fun MainScreen(
             activeTile != null -> DesignTokens.tileWeightCollapsed
             else -> DesignTokens.tileWeightIdleTopMiddle  // idle = 1f
         },
-        animationSpec = tileAnimationSpec
+        animationSpec = tileAnimationSpec()
     )
     val weightMiddle by animateFloatAsState(
         targetValue = when {
@@ -171,7 +172,7 @@ fun MainScreen(
             activeTile != null -> DesignTokens.tileWeightCollapsed
             else -> DesignTokens.tileWeightIdleTopMiddle  // idle = 1f
         },
-        animationSpec = tileAnimationSpec
+        animationSpec = tileAnimationSpec()
     )
     val weightBottom by animateFloatAsState(
         targetValue = when {
@@ -179,7 +180,7 @@ fun MainScreen(
             activeTile != null -> DesignTokens.tileWeightCollapsed
             else -> DesignTokens.tileWeightIdleBottom  // idle = 0.18f
         },
-        animationSpec = tileAnimationSpec
+        animationSpec = tileAnimationSpec()
     )
 
     // Статистика КБЖУ
@@ -346,85 +347,117 @@ private fun CompactLayout(
     // Минимальная высота плитки чата (включая safe area снизу)
     val chatMinHeight = DesignTokens.chatTileMinHeight + safeBottomDp
 
-    Box(modifier = Modifier.fillMaxSize()) {
-        // Слой 1: верхние плитки (TOP и MIDDLE) — скрыты когда чат раскрыт
-        if (!chatExpanded) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = DesignTokens.screenPadding)
-                    .padding(top = safeTopDp + DesignTokens.screenPadding)
-                    .padding(bottom = chatMinHeight)
-            ) {
-                Tile(
-                    position = TilePosition.TOP,
-                    isExpanded = activeTile == TilePosition.TOP,
-                    isCollapsed = activeTile != null && activeTile != TilePosition.TOP,
-                    onClick = { viewModel.onTileClick(TilePosition.TOP) },
-                    modifier = Modifier.weight(weightTop),
-                    overflowContent = {
-                        KbjuTileWheelOverflowContent(
-                            isExpanded = activeTile == TilePosition.TOP,
-                            currentWeight = currentWeight,
-                            onWeightChange = viewModel::updateWeight,
-                            activityCoefficient = activityCoefficient,
-                            onActivityChange = viewModel::updateActivityCoefficient,
-                            hazeState = kbjuHazeState
-                        )
-                    }
-                ) {
-                    KbjuTileContent(
-                        kcalStat = kcalStat,
-                        macroStats = macroStats,
-                        activeTile = activeTile,
-                        userProfile = userProfile,
+    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+        val screenHeight = maxHeight
+        
+        // Анимация высоты плитки чата
+        val chatTileHeight by animateDpAsState(
+            targetValue = if (chatExpanded) screenHeight else chatMinHeight,
+            animationSpec = tileAnimationSpec(),
+            label = "chatTileHeight"
+        )
+        
+        // Анимация скругления углов (от 24dp до 0dp)
+        val cornerRadius by animateDpAsState(
+            targetValue = if (chatExpanded) 0.dp else DesignTokens.bottomTileCornerRadius,
+            animationSpec = tileAnimationSpec(),
+            label = "cornerRadius"
+        )
+        
+        val animatedShape = RoundedCornerShape(
+            topStart = cornerRadius,
+            topEnd = cornerRadius,
+            bottomStart = 0.dp,
+            bottomEnd = 0.dp
+        )
+        
+        // Оптимизация: верхние плитки активны только когда чат почти свёрнут
+        // Порог — когда высота плитки чата меньше минимальной + 20% от разницы
+        val expansionThreshold = chatMinHeight + (screenHeight - chatMinHeight) * 0.15f
+        val topTilesActive = chatTileHeight < expansionThreshold
+        
+        // Слой 1: верхние плитки (TOP и MIDDLE) — всегда отображаются на заднем плане
+        // Плитка чата плавно перекрывает их при разворачивании
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = DesignTokens.screenPadding)
+                .padding(top = safeTopDp + DesignTokens.screenPadding)
+                .padding(bottom = chatMinHeight)
+        ) {
+            Tile(
+                position = TilePosition.TOP,
+                isExpanded = activeTile == TilePosition.TOP,
+                isCollapsed = activeTile != null && activeTile != TilePosition.TOP,
+                onClick = { viewModel.onTileClick(TilePosition.TOP) },
+                modifier = Modifier.weight(weightTop),
+                overflowContent = {
+                    KbjuTileWheelOverflowContent(
+                        isExpanded = activeTile == TilePosition.TOP,
+                        currentWeight = currentWeight,
+                        onWeightChange = viewModel::updateWeight,
+                        activityCoefficient = activityCoefficient,
+                        onActivityChange = viewModel::updateActivityCoefficient,
                         hazeState = kbjuHazeState
                     )
                 }
+            ) {
+                KbjuTileContent(
+                    kcalStat = kcalStat,
+                    macroStats = macroStats,
+                    activeTile = activeTile,
+                    userProfile = userProfile,
+                    hazeState = kbjuHazeState,
+                    isActive = topTilesActive
+                )
+            }
 
-                Tile(
-                    position = TilePosition.MIDDLE,
-                    isExpanded = activeTile == TilePosition.MIDDLE,
+            Tile(
+                position = TilePosition.MIDDLE,
+                isExpanded = activeTile == TilePosition.MIDDLE,
+                isCollapsed = activeTile != null && activeTile != TilePosition.MIDDLE,
+                onClick = { viewModel.onTileClick(TilePosition.MIDDLE) },
+                modifier = Modifier.weight(weightMiddle)
+            ) {
+                InputTileContent(
+                    entries = todayEntries,
                     isCollapsed = activeTile != null && activeTile != TilePosition.MIDDLE,
-                    onClick = { viewModel.onTileClick(TilePosition.MIDDLE) },
-                    modifier = Modifier.weight(weightMiddle)
-                ) {
-                    InputTileContent(
-                        entries = todayEntries,
-                        isCollapsed = activeTile != null && activeTile != TilePosition.MIDDLE,
-                        onEntryClick = onEntryClick
-                    )
-                }
+                    onEntryClick = onEntryClick,
+                    isActive = topTilesActive
+                )
             }
         }
 
         // Слой 2: плитка чата — edge-to-edge, уходит за нижний край экрана
-        // При раскрытии — на весь экран (fullscreen), иначе — фиксированная минимальная высота
+        // Анимированная высота и скругление при разворачивании/сворачивании
         Tile(
             position = TilePosition.BOTTOM,
             isExpanded = chatExpanded,
             isCollapsed = false, // Нижняя плитка никогда не "схлопывается" визуально
             onClick = { viewModel.onTileClick(TilePosition.BOTTOM) },
-            shape = if (chatExpanded) RoundedCornerShape(0.dp) else bottomTileShape,
+            shape = animatedShape,
             edgeToEdge = true,
-            modifier = if (chatExpanded) {
-                Modifier.fillMaxSize()
-            } else {
-                Modifier
-                    .fillMaxWidth()
-                    .align(Alignment.BottomCenter)
-                    .height(chatMinHeight)
-            }
+            modifier = Modifier
+                .fillMaxWidth()
+                .align(Alignment.BottomCenter)
+                .height(chatTileHeight)
         ) {
             BottomTileContent(
                 messages = chatMessages,
-                onSendMessage = viewModel::sendChatMessage,
-                isLoading = chatLoading,
                 isCollapsed = !chatExpanded,
-                bottomPadding = safeBottomDp,
-                onExpandRequest = { viewModel.onTileClick(TilePosition.BOTTOM) }
+                bottomPadding = safeBottomDp
             )
         }
+        
+        // Слой 3: блок ввода — всегда внизу экрана, не движется с плиткой
+        ChatInputBlock(
+            onSendMessage = viewModel::sendChatMessage,
+            isLoading = chatLoading,
+            isCollapsed = !chatExpanded,
+            bottomPadding = safeBottomDp,
+            onExpandRequest = { viewModel.onTileClick(TilePosition.BOTTOM) },
+            modifier = Modifier.align(Alignment.BottomCenter)
+        )
     }
 }
 
@@ -500,10 +533,17 @@ private fun ExpandedLayout(
             ) {
                 BottomTileContent(
                     messages = chatMessages,
-                    onSendMessage = viewModel::sendChatMessage,
-                    isLoading = chatLoading
+                    isCollapsed = false
                 )
             }
+            
+            // Блок ввода поверх плитки чата
+            ChatInputBlock(
+                onSendMessage = viewModel::sendChatMessage,
+                isLoading = chatLoading,
+                isCollapsed = false,
+                modifier = Modifier.align(Alignment.BottomCenter)
+            )
         }
     }
 }
