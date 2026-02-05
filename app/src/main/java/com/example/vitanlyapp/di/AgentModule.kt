@@ -8,6 +8,7 @@ import com.example.vitanlyapp.data.orchestrator.AgentOrchestratorImpl
 import com.example.vitanlyapp.domain.orchestrator.AgentOrchestrator
 import com.example.vitanlyapp.domain.repository.ChatRepository
 import com.example.vitanlyapp.domain.repository.DayEntryRepository
+import com.example.vitanlyapp.domain.repository.ThemeRepository
 import com.example.vitanlyapp.domain.repository.UserProfileRepository
 import dagger.Module
 import dagger.Provides
@@ -45,10 +46,14 @@ object AgentModule {
     fun provideAppControlAdapter(
         userProfileRepository: UserProfileRepository,
         dayEntryRepository: DayEntryRepository,
+        themeRepository: ThemeRepository,
+        chatRepository: ChatRepository,
         foodParsingAdapter: FoodParsingAdapter
     ): AppControlAdapter = AppControlAdapter(
         userProfileRepository = userProfileRepository,
         dayEntryRepository = dayEntryRepository,
+        themeRepository = themeRepository,
+        chatRepository = chatRepository,
         foodParsingAdapter = foodParsingAdapter
     )
 

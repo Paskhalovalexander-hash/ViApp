@@ -62,9 +62,22 @@ interface DayEntryRepository {
     suspend fun clearToday()
 
     /**
+     * Очистить все записи за указанную дату.
+     * @param date дата в формате "yyyy-MM-dd"
+     * @return количество удалённых записей
+     */
+    suspend fun clearDay(date: String): Int
+
+    /**
      * Получить итоги КБЖУ за сегодня.
      */
     suspend fun getTodayTotals(): DayTotals
+
+    /**
+     * Получить итоги КБЖУ за указанную дату.
+     * @param date дата в формате "yyyy-MM-dd"
+     */
+    suspend fun getDayTotals(date: String): DayTotals
 
     /**
      * Получить запись по ID.

@@ -103,8 +103,16 @@ class DayEntryRepositoryImpl @Inject constructor(
         dayEntryDao.clearDay(today())
     }
 
+    override suspend fun clearDay(date: String): Int {
+        return dayEntryDao.clearDay(date)
+    }
+
     override suspend fun getTodayTotals(): DayTotals {
         val date = today()
+        return getDayTotals(date)
+    }
+
+    override suspend fun getDayTotals(date: String): DayTotals {
         return DayTotals(
             kcal = dayEntryDao.getTotalKcalForDate(date),
             protein = dayEntryDao.getTotalProteinForDate(date),

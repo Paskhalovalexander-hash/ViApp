@@ -15,7 +15,9 @@ import kotlinx.serialization.json.JsonElement
  * Типы команд:
  * - Профиль: set_weight, set_height, set_age, set_gender, set_activity
  * - Цели: set_goal, set_target_weight, set_tempo
- * - Еда: add_food, delete_food, delete_meal, clear_day
+ * - Еда: add_food, delete_food, delete_meal, clear_day, delete_day
+ * - Приложение: set_theme, clear_chat, open_tile, close_tile
+ * - Данные: reset_profile, reset_all_data
  */
 @Serializable
 sealed class AgentCommand {
@@ -113,4 +115,47 @@ sealed class AgentCommand {
         val id: Long,
         val newWeightGrams: Int
     ) : AgentCommand()
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Команды управления приложением
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /** Установить тему приложения (classic/warm_dark) */
+    @Serializable
+    @SerialName("set_theme")
+    data class SetTheme(val value: ThemeMode) : AgentCommand()
+
+    /** Удалить все записи за указанную дату (формат: yyyy-MM-dd) */
+    @Serializable
+    @SerialName("delete_day")
+    data class DeleteDay(val date: String) : AgentCommand()
+
+    /** Очистить историю чата */
+    @Serializable
+    @SerialName("clear_chat")
+    data object ClearChat : AgentCommand()
+
+    /** Открыть плитку по позиции (top/middle/bottom) */
+    @Serializable
+    @SerialName("open_tile")
+    data class OpenTile(val position: TilePosition) : AgentCommand()
+
+    /** Закрыть текущую открытую плитку */
+    @Serializable
+    @SerialName("close_tile")
+    data object CloseTile : AgentCommand()
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Команды сброса данных
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /** Сбросить профиль пользователя к значениям по умолчанию */
+    @Serializable
+    @SerialName("reset_profile")
+    data object ResetProfile : AgentCommand()
+
+    /** Полный сброс всех данных (профиль, еда, чат) */
+    @Serializable
+    @SerialName("reset_all_data")
+    data object ResetAllData : AgentCommand()
 }

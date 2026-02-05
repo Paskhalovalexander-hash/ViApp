@@ -2,6 +2,7 @@ package com.example.vitanlyapp.domain.orchestrator
 
 import com.example.vitanlyapp.domain.model.AgentCommand
 import com.example.vitanlyapp.domain.model.AgentResponse
+import com.example.vitanlyapp.domain.model.TilePosition
 
 /**
  * Оркестратор AI-агента — фасад для координации всех адаптеров Agent Layer.
@@ -165,6 +166,26 @@ sealed class CommandExecutionResult {
         override val commandName: String,
         val error: String
     ) : CommandExecutionResult()
+
+    /** Команда требует UI-действия (обрабатывается ViewModel) */
+    data class UiAction(
+        override val commandName: String,
+        val action: UiActionType
+    ) : CommandExecutionResult()
+}
+
+/**
+ * Типы UI-действий, которые должен выполнить ViewModel.
+ */
+sealed class UiActionType {
+    /** Открыть плитку по позиции */
+    data class OpenTile(val position: TilePosition) : UiActionType()
+
+    /** Закрыть текущую плитку */
+    data object CloseTile : UiActionType()
+
+    /** Полный сброс данных (переход на онбординг) */
+    data object ResetAllData : UiActionType()
 }
 
 /**

@@ -12,6 +12,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -214,87 +215,45 @@ fun MainScreen(
             val imeBottom = WindowInsets.ime.getBottom(density)
             val isKeyboardVisible = imeBottom > 0
 
-            Box(modifier = Modifier.fillMaxSize()) {
-                if (isExpandedLayout) {
-                    ExpandedLayout(
-                        weightTop = weightTop,
-                        weightMiddle = weightMiddle,
-                        activeTile = activeTile,
-                        kcalStat = kcalStat,
-                        macroStats = macroStats,
-                        currentWeight = currentWeight,
-                        activityCoefficient = activityCoefficient,
-                        chatMessages = chatMessages,
-                        chatLoading = chatLoading,
-                        todayEntries = todayEntries,
-                        userProfile = userProfile,
-                        onEntryClick = { selectedEntry = it },
-                        viewModel = viewModel
-                    )
-                } else {
-                    CompactLayout(
-                        weightTop = weightTop,
-                        weightMiddle = weightMiddle,
-                        activeTile = activeTile,
-                        isKeyboardVisible = isKeyboardVisible,
-                        safeTopPx = safeTop,
-                        safeBottomPx = safeBottom,
-                        kcalStat = kcalStat,
-                        macroStats = macroStats,
-                        currentWeight = currentWeight,
-                        activityCoefficient = activityCoefficient,
-                        chatMessages = chatMessages,
-                        chatLoading = chatLoading,
-                        todayEntries = todayEntries,
-                        userProfile = userProfile,
-                        onEntryClick = { selectedEntry = it },
-                        viewModel = viewModel
-                    )
-                }
-
-                // Кнопки управления — правый верхний угол (только при развёрнутой верхней плитке)
-                Box(modifier = Modifier.align(Alignment.TopEnd)) {
-                    AnimatedVisibility(
-                        visible = activeTile == TilePosition.TOP,
-                        enter = fadeIn() + expandVertically(),
-                        exit = fadeOut() + shrinkVertically()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(8.dp),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            // Кнопка сброса данных
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clickable { showResetDialog = true },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.DeleteForever,
-                                    contentDescription = "Сбросить данные",
-                                    tint = scheme.textColor.copy(alpha = 0.6f),
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-
-                            // Кнопка переключения темы
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clickable { viewModel.toggleTheme() },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Palette,
-                                    contentDescription = "Переключить тему",
-                                    tint = scheme.textColor,
-                                    modifier = Modifier.size(24.dp)
-                                )
-                            }
-                        }
-                    }
-                }
+            if (isExpandedLayout) {
+                ExpandedLayout(
+                    weightTop = weightTop,
+                    weightMiddle = weightMiddle,
+                    activeTile = activeTile,
+                    kcalStat = kcalStat,
+                    macroStats = macroStats,
+                    currentWeight = currentWeight,
+                    activityCoefficient = activityCoefficient,
+                    chatMessages = chatMessages,
+                    chatLoading = chatLoading,
+                    todayEntries = todayEntries,
+                    userProfile = userProfile,
+                    onEntryClick = { selectedEntry = it },
+                    onShowResetDialog = { showResetDialog = true },
+                    onToggleTheme = { viewModel.toggleTheme() },
+                    viewModel = viewModel
+                )
+            } else {
+                CompactLayout(
+                    weightTop = weightTop,
+                    weightMiddle = weightMiddle,
+                    activeTile = activeTile,
+                    isKeyboardVisible = isKeyboardVisible,
+                    safeTopPx = safeTop,
+                    safeBottomPx = safeBottom,
+                    kcalStat = kcalStat,
+                    macroStats = macroStats,
+                    currentWeight = currentWeight,
+                    activityCoefficient = activityCoefficient,
+                    chatMessages = chatMessages,
+                    chatLoading = chatLoading,
+                    todayEntries = todayEntries,
+                    userProfile = userProfile,
+                    onEntryClick = { selectedEntry = it },
+                    onShowResetDialog = { showResetDialog = true },
+                    onToggleTheme = { viewModel.toggleTheme() },
+                    viewModel = viewModel
+                )
             }
         }
         }
@@ -326,12 +285,17 @@ private fun CompactLayout(
     todayEntries: List<DayEntry>,
     userProfile: UserProfile?,
     onEntryClick: (DayEntry) -> Unit,
+    onShowResetDialog: () -> Unit,
+    onToggleTheme: () -> Unit,
     viewModel: MainViewModel
 ) {
     val density = LocalDensity.current
     
     // HazeState для glassmorphism плашек веса/активности в верхней плитке
     val kbjuHazeState = rememberHazeState()
+    
+    // Текст для автозаполнения поля ввода (из подсказки)
+    var chatPrefillText by remember { mutableStateOf("") }
 
     // Когда клавиатура видна и чат раскрыт — плитка чата перекрывает остальные
     val chatFullScreen = isKeyboardVisible && activeTile == TilePosition.BOTTOM
@@ -383,7 +347,8 @@ private fun CompactLayout(
                 .fillMaxSize()
                 .padding(horizontal = DesignTokens.screenPadding)
                 .padding(top = safeTopDp + DesignTokens.screenPadding)
-                .padding(bottom = chatMinHeight)
+                .padding(bottom = chatMinHeight + DesignTokens.tileSpacing),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.tileSpacing)
         ) {
             Tile(
                 position = TilePosition.TOP,
@@ -402,14 +367,67 @@ private fun CompactLayout(
                     )
                 }
             ) {
-                KbjuTileContent(
-                    kcalStat = kcalStat,
-                    macroStats = macroStats,
-                    activeTile = activeTile,
-                    userProfile = userProfile,
-                    hazeState = kbjuHazeState,
-                    isActive = topTilesActive
-                )
+                val scheme = LocalAppColorScheme.current
+                Box(modifier = Modifier.fillMaxSize()) {
+                    KbjuTileContent(
+                        kcalStat = kcalStat,
+                        macroStats = macroStats,
+                        activeTile = activeTile,
+                        userProfile = userProfile,
+                        hazeState = kbjuHazeState,
+                        isActive = topTilesActive
+                    )
+                    
+                    // Кнопки управления — правый верхний угол (только при развёрнутой плитке)
+                    Box(modifier = Modifier.align(Alignment.TopEnd)) {
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = activeTile == TilePosition.TOP,
+                            enter = fadeIn(tween(150)),
+                            exit = fadeOut(tween(100))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                // Кнопка сброса данных
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) { onShowResetDialog() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeleteForever,
+                                        contentDescription = "Сбросить данные",
+                                        tint = scheme.textColor.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+
+                                // Кнопка переключения темы
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) { onToggleTheme() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Palette,
+                                        contentDescription = "Переключить тему",
+                                        tint = scheme.textColor.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             Tile(
@@ -445,7 +463,8 @@ private fun CompactLayout(
             BottomTileContent(
                 messages = chatMessages,
                 isCollapsed = !chatExpanded,
-                bottomPadding = safeBottomDp
+                bottomPadding = safeBottomDp,
+                onHintClick = { hint -> chatPrefillText = hint }
             )
         }
         
@@ -456,6 +475,8 @@ private fun CompactLayout(
             isCollapsed = !chatExpanded,
             bottomPadding = safeBottomDp,
             onExpandRequest = { viewModel.onTileClick(TilePosition.BOTTOM) },
+            prefillText = chatPrefillText,
+            onPrefillConsumed = { chatPrefillText = "" },
             modifier = Modifier.align(Alignment.BottomCenter)
         )
     }
@@ -475,13 +496,21 @@ private fun ExpandedLayout(
     todayEntries: List<DayEntry>,
     userProfile: UserProfile?,
     onEntryClick: (DayEntry) -> Unit,
+    onShowResetDialog: () -> Unit,
+    onToggleTheme: () -> Unit,
     viewModel: MainViewModel
 ) {
     // HazeState для glassmorphism плашек веса/активности в верхней плитке
     val kbjuHazeState = rememberHazeState()
+    
+    // Текст для автозаполнения поля ввода (из подсказки)
+    var chatPrefillText by remember { mutableStateOf("") }
 
     Row(modifier = Modifier.fillMaxSize()) {
-        Column(modifier = Modifier.weight(DesignTokens.expandedLayoutLeftPanelWeight)) {
+        Column(
+            modifier = Modifier.weight(DesignTokens.expandedLayoutLeftPanelWeight),
+            verticalArrangement = Arrangement.spacedBy(DesignTokens.tileSpacing)
+        ) {
             Tile(
                 position = TilePosition.TOP,
                 isExpanded = activeTile == TilePosition.TOP,
@@ -499,13 +528,66 @@ private fun ExpandedLayout(
                     )
                 }
             ) {
-                KbjuTileContent(
-                    kcalStat = kcalStat,
-                    macroStats = macroStats,
-                    activeTile = activeTile,
-                    userProfile = userProfile,
-                    hazeState = kbjuHazeState
-                )
+                val scheme = LocalAppColorScheme.current
+                Box(modifier = Modifier.fillMaxSize()) {
+                    KbjuTileContent(
+                        kcalStat = kcalStat,
+                        macroStats = macroStats,
+                        activeTile = activeTile,
+                        userProfile = userProfile,
+                        hazeState = kbjuHazeState
+                    )
+                    
+                    // Кнопки управления — правый верхний угол (только при развёрнутой плитке)
+                    Box(modifier = Modifier.align(Alignment.TopEnd)) {
+                        androidx.compose.animation.AnimatedVisibility(
+                            visible = activeTile == TilePosition.TOP,
+                            enter = fadeIn(tween(150)),
+                            exit = fadeOut(tween(100))
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(4.dp),
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                // Кнопка сброса данных
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) { onShowResetDialog() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.DeleteForever,
+                                        contentDescription = "Сбросить данные",
+                                        tint = scheme.textColor.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+
+                                // Кнопка переключения темы
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) { onToggleTheme() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Palette,
+                                        contentDescription = "Переключить тему",
+                                        tint = scheme.textColor.copy(alpha = 0.7f),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             Tile(
@@ -533,7 +615,8 @@ private fun ExpandedLayout(
             ) {
                 BottomTileContent(
                     messages = chatMessages,
-                    isCollapsed = false
+                    isCollapsed = false,
+                    onHintClick = { hint -> chatPrefillText = hint }
                 )
             }
             
@@ -542,6 +625,8 @@ private fun ExpandedLayout(
                 onSendMessage = viewModel::sendChatMessage,
                 isLoading = chatLoading,
                 isCollapsed = false,
+                prefillText = chatPrefillText,
+                onPrefillConsumed = { chatPrefillText = "" },
                 modifier = Modifier.align(Alignment.BottomCenter)
             )
         }

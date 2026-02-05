@@ -160,6 +160,10 @@ class AgentOrchestratorImpl @Inject constructor(
                 commandName = result.command.toCommandName(),
                 error = result.error
             )
+            is CommandResult.UiAction -> CommandExecutionResult.UiAction(
+                commandName = result.command.toCommandName(),
+                action = result.action
+            )
         }
     }
 
@@ -197,19 +201,31 @@ class AgentOrchestratorImpl @Inject constructor(
  * Получает строковое имя команды для логирования/отображения.
  */
 private fun AgentCommand.toCommandName(): String = when (this) {
+    // Профиль
     is AgentCommand.SetWeight -> "set_weight"
     is AgentCommand.SetHeight -> "set_height"
     is AgentCommand.SetAge -> "set_age"
     is AgentCommand.SetGender -> "set_gender"
     is AgentCommand.SetActivity -> "set_activity"
+    // Цели
     is AgentCommand.SetGoal -> "set_goal"
     is AgentCommand.SetTargetWeight -> "set_target_weight"
     is AgentCommand.SetTempo -> "set_tempo"
+    // Еда
     is AgentCommand.AddFood -> "add_food"
     is AgentCommand.DeleteFood -> "delete_food"
     is AgentCommand.DeleteMeal -> "delete_meal"
     is AgentCommand.ClearDay -> "clear_day"
+    is AgentCommand.DeleteDay -> "delete_day"
     is AgentCommand.DeleteFoodById -> "delete_food_by_id"
     is AgentCommand.RepeatFood -> "repeat_food"
     is AgentCommand.UpdateFoodWeight -> "update_food_weight"
+    // Приложение
+    is AgentCommand.SetTheme -> "set_theme"
+    is AgentCommand.ClearChat -> "clear_chat"
+    is AgentCommand.OpenTile -> "open_tile"
+    is AgentCommand.CloseTile -> "close_tile"
+    // Данные
+    is AgentCommand.ResetProfile -> "reset_profile"
+    is AgentCommand.ResetAllData -> "reset_all_data"
 }

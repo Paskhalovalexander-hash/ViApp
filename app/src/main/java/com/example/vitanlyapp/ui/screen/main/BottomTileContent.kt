@@ -42,6 +42,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.vitanlyapp.domain.model.ChatMessage
 import com.example.vitanlyapp.domain.model.ChatRole
+import com.example.vitanlyapp.ui.component.ChatHintsCarousel
 import com.example.vitanlyapp.ui.component.TileBackground
 import com.example.vitanlyapp.ui.design.DesignTokens
 import com.example.vitanlyapp.ui.design.LocalAppColorScheme
@@ -88,12 +89,21 @@ fun ChatBubble(
 /**
  * Контент плитки чата — только список сообщений (без блока ввода).
  * Блок ввода вынесен отдельно в ChatInputBlock для фиксированной позиции.
+ * 
+ * Когда чат пустой и раскрыт — показывает карусель подсказок.
+ *
+ * @param messages Список сообщений чата
+ * @param isCollapsed Свёрнута ли плитка
+ * @param bottomPadding Отступ снизу (для safe area)
+ * @param onHintClick Callback при клике на подсказку (для автозаполнения поля ввода)
+ * @param modifier Модификатор
  */
 @Composable
 fun BottomTileContent(
     messages: List<ChatMessage>,
     isCollapsed: Boolean = false,
     bottomPadding: Dp = 0.dp,
+    onHintClick: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     TileBackground()
@@ -108,27 +118,42 @@ fun BottomTileContent(
 
     // Контент чата — только когда раскрыто
     if (!isCollapsed) {
-        Column(
-            modifier = modifier
-                .fillMaxSize()
-                .padding(horizontal = DesignTokens.tilePadding, vertical = 4.dp)
-        ) {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentPadding = PaddingValues(
-                    top = 4.dp,
-                    bottom = DesignTokens.chatInputBlockHeight + 32.dp + bottomPadding
-                ),
-                verticalArrangement = Arrangement.Bottom
+        if (messages.isEmpty()) {
+            // Пустой чат — показываем карусель подсказок
+            Box(
+                modifier = modifier
+                    .fillMaxSize()
+                    .padding(bottom = DesignTokens.chatInputBlockHeight + 32.dp + bottomPadding),
+                contentAlignment = Alignment.Center
             ) {
-                items(
-                    items = messages,
-                    key = { msg -> "${msg.role}-${msg.text.hashCode()}" }
-                ) { message ->
-                    ChatBubble(message = message)
+                ChatHintsCarousel(
+                    onHintClick = onHintClick
+                )
+            }
+        } else {
+            // Есть сообщения — показываем список
+            Column(
+                modifier = modifier
+                    .fillMaxSize()
+                    .padding(horizontal = DesignTokens.tilePadding, vertical = 4.dp)
+            ) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxWidth(),
+                    contentPadding = PaddingValues(
+                        top = 4.dp,
+                        bottom = DesignTokens.chatInputBlockHeight + 32.dp + bottomPadding
+                    ),
+                    verticalArrangement = Arrangement.Bottom
+                ) {
+                    items(
+                        items = messages,
+                        key = { msg -> "${msg.role}-${msg.text.hashCode()}" }
+                    ) { message ->
+                        ChatBubble(message = message)
+                    }
                 }
             }
         }
@@ -138,6 +163,15 @@ fun BottomTileContent(
 /**
  * Блок ввода сообщения — вынесен отдельно для фиксированной позиции внизу экрана.
  * Не движется вместе с плиткой чата при анимации.
+ *
+ * @param onSendMessage Callback при отправке сообщения
+ * @param isLoading Идёт ли загрузка
+ * @param isCollapsed Свёрнута ли плитка
+ * @param bottomPadding Отступ снизу (для safe area)
+ * @param onExpandRequest Callback при запросе раскрытия плитки
+ * @param prefillText Текст для автозаполнения поля ввода (например, из подсказки)
+ * @param onPrefillConsumed Callback после применения prefillText (для сброса)
+ * @param modifier Модификатор
  */
 @Composable
 fun ChatInputBlock(
@@ -146,10 +180,20 @@ fun ChatInputBlock(
     isCollapsed: Boolean = false,
     bottomPadding: Dp = 0.dp,
     onExpandRequest: () -> Unit = {},
+    prefillText: String = "",
+    onPrefillConsumed: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val scheme = LocalAppColorScheme.current
     var inputText by remember { mutableStateOf("") }
+    
+    // Применяем prefillText когда он приходит
+    LaunchedEffect(prefillText) {
+        if (prefillText.isNotEmpty()) {
+            inputText = prefillText
+            onPrefillConsumed()
+        }
+    }
     
     // Фокус и клавиатура — автоматически при раскрытии
     val focusRequester = remember { FocusRequester() }

@@ -3,7 +3,10 @@ package com.example.vitanlyapp.data.agent
 import com.example.vitanlyapp.domain.model.AgentCommand
 import com.example.vitanlyapp.domain.model.AgentResponse
 import com.example.vitanlyapp.domain.model.FoodEntry
+import com.example.vitanlyapp.domain.orchestrator.UiActionType
+import com.example.vitanlyapp.domain.repository.ChatRepository
 import com.example.vitanlyapp.domain.repository.DayEntryRepository
+import com.example.vitanlyapp.domain.repository.ThemeRepository
 import com.example.vitanlyapp.domain.repository.UserProfileRepository
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -14,7 +17,9 @@ import javax.inject.Singleton
  * Обрабатывает все типы AgentCommand:
  * - Команды профиля: set_weight, set_height, set_age, set_gender, set_activity
  * - Команды целей: set_goal, set_target_weight, set_tempo
- * - Команды еды: add_food, delete_food, delete_meal, clear_day
+ * - Команды еды: add_food, delete_food, delete_meal, clear_day, delete_day
+ * - Команды приложения: set_theme, clear_chat, open_tile, close_tile
+ * - Команды данных: reset_profile, reset_all_data
  *
  * @see AgentCommand
  */
@@ -22,6 +27,8 @@ import javax.inject.Singleton
 class AppControlAdapter @Inject constructor(
     private val userProfileRepository: UserProfileRepository,
     private val dayEntryRepository: DayEntryRepository,
+    private val themeRepository: ThemeRepository,
+    private val chatRepository: ChatRepository,
     private val foodParsingAdapter: FoodParsingAdapter
 ) {
 
@@ -220,6 +227,80 @@ class AppControlAdapter @Inject constructor(
                         )
                     }
                 }
+
+                // ══════════════════════════════════════════════════════════════════
+                // Команды управления приложением
+                // ══════════════════════════════════════════════════════════════════
+
+                is AgentCommand.SetTheme -> {
+                    themeRepository.setThemeMode(command.value)
+                    CommandResult.Success(
+                        command = command,
+                        message = "Тема изменена: ${command.value.name.lowercase()}"
+                    )
+                }
+
+                is AgentCommand.DeleteDay -> {
+                    val count = dayEntryRepository.clearDay(command.date)
+                    if (count > 0) {
+                        CommandResult.Success(
+                            command = command,
+                            message = "Удалено $count записей за ${command.date}"
+                        )
+                    } else {
+                        CommandResult.Success(
+                            command = command,
+                            message = "Записей за ${command.date} не найдено"
+                        )
+                    }
+                }
+
+                is AgentCommand.ClearChat -> {
+                    chatRepository.clearHistory()
+                    CommandResult.Success(
+                        command = command,
+                        message = "История чата очищена"
+                    )
+                }
+
+                is AgentCommand.OpenTile -> {
+                    // UI-команда: возвращаем результат с указанием позиции
+                    // ViewModel обрабатывает это и открывает плитку
+                    CommandResult.UiAction(
+                        command = command,
+                        action = UiActionType.OpenTile(command.position)
+                    )
+                }
+
+                is AgentCommand.CloseTile -> {
+                    // UI-команда: ViewModel закрывает текущую плитку
+                    CommandResult.UiAction(
+                        command = command,
+                        action = UiActionType.CloseTile
+                    )
+                }
+
+                // ══════════════════════════════════════════════════════════════════
+                // Команды сброса данных
+                // ══════════════════════════════════════════════════════════════════
+
+                is AgentCommand.ResetProfile -> {
+                    userProfileRepository.deleteProfile()
+                    userProfileRepository.ensureProfileExists()
+                    CommandResult.Success(
+                        command = command,
+                        message = "Профиль сброшен к значениям по умолчанию"
+                    )
+                }
+
+                is AgentCommand.ResetAllData -> {
+                    // UI-команда: требует перехода на онбординг после сброса
+                    userProfileRepository.clearAllData()
+                    CommandResult.UiAction(
+                        command = command,
+                        action = UiActionType.ResetAllData
+                    )
+                }
             }
         } catch (e: Exception) {
             CommandResult.Error(
@@ -248,6 +329,8 @@ class AppControlAdapter @Inject constructor(
         val profile = mutableListOf<AgentCommand>()
         val goals = mutableListOf<AgentCommand>()
         val food = mutableListOf<AgentCommand>()
+        val app = mutableListOf<AgentCommand>()
+        val data = mutableListOf<AgentCommand>()
 
         for (command in commands) {
             when (command) {
@@ -265,13 +348,22 @@ class AppControlAdapter @Inject constructor(
                 is AgentCommand.DeleteFood,
                 is AgentCommand.DeleteMeal,
                 is AgentCommand.ClearDay,
+                is AgentCommand.DeleteDay,
                 is AgentCommand.DeleteFoodById,
                 is AgentCommand.RepeatFood,
                 is AgentCommand.UpdateFoodWeight -> food.add(command)
+
+                is AgentCommand.SetTheme,
+                is AgentCommand.ClearChat,
+                is AgentCommand.OpenTile,
+                is AgentCommand.CloseTile -> app.add(command)
+
+                is AgentCommand.ResetProfile,
+                is AgentCommand.ResetAllData -> data.add(command)
             }
         }
 
-        return CommandCategories(profile, goals, food)
+        return CommandCategories(profile, goals, food, app, data)
     }
 }
 
@@ -298,6 +390,12 @@ sealed class CommandResult {
         override val command: AgentCommand,
         val error: String
     ) : CommandResult()
+
+    /** Команда требует UI-действия (обрабатывается ViewModel) */
+    data class UiAction(
+        override val command: AgentCommand,
+        val action: UiActionType
+    ) : CommandResult()
 }
 
 /**
@@ -306,8 +404,10 @@ sealed class CommandResult {
 data class CommandCategories(
     val profileCommands: List<AgentCommand>,
     val goalCommands: List<AgentCommand>,
-    val foodCommands: List<AgentCommand>
+    val foodCommands: List<AgentCommand>,
+    val appCommands: List<AgentCommand> = emptyList(),
+    val dataCommands: List<AgentCommand> = emptyList()
 ) {
-    val totalCount: Int get() = profileCommands.size + goalCommands.size + foodCommands.size
+    val totalCount: Int get() = profileCommands.size + goalCommands.size + foodCommands.size + appCommands.size + dataCommands.size
     val isEmpty: Boolean get() = totalCount == 0
 }

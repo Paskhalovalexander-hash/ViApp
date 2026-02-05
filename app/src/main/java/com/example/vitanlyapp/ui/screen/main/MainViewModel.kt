@@ -15,6 +15,7 @@ import com.example.vitanlyapp.domain.model.toBarStats
 import com.example.vitanlyapp.domain.orchestrator.AgentOrchestrator
 import com.example.vitanlyapp.domain.orchestrator.CommandExecutionResult
 import com.example.vitanlyapp.domain.orchestrator.OrchestratorResult
+import com.example.vitanlyapp.domain.orchestrator.UiActionType
 import com.example.vitanlyapp.domain.repository.DayEntry
 import com.example.vitanlyapp.domain.repository.DayEntryRepository
 import com.example.vitanlyapp.domain.repository.KbjuRepository
@@ -280,7 +281,32 @@ class MainViewModel @Inject constructor(
             is CommandExecutionResult.Success -> result.message
             is CommandExecutionResult.Error -> "Ошибка: ${result.error}"
             is CommandExecutionResult.Skipped -> result.reason
+            is CommandExecutionResult.UiAction -> {
+                // Обрабатываем UI-действия
+                handleUiAction(result.action)
+                null // Не добавляем сообщение, т.к. действие уже выполнено
+            }
         }
-        _chatMessages.value = _chatMessages.value + ChatMessage(ChatRole.ASSISTANT, message)
+        message?.let {
+            _chatMessages.value = _chatMessages.value + ChatMessage(ChatRole.ASSISTANT, it)
+        }
+    }
+
+    /**
+     * Обрабатывает UI-действия от агента.
+     */
+    private fun handleUiAction(action: UiActionType) {
+        when (action) {
+            is UiActionType.OpenTile -> {
+                _activeTile.value = action.position
+            }
+            is UiActionType.CloseTile -> {
+                _activeTile.value = null
+            }
+            is UiActionType.ResetAllData -> {
+                // Сброс данных уже выполнен в AppControlAdapter
+                // ViewModel получит callback через resetAllData()
+            }
+        }
     }
 }

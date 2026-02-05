@@ -5,6 +5,8 @@ import com.example.vitanlyapp.domain.model.AgentCommand
 import com.example.vitanlyapp.domain.model.AgentResponse
 import com.example.vitanlyapp.domain.model.FoodEntry
 import com.example.vitanlyapp.domain.model.Gender
+import com.example.vitanlyapp.domain.model.ThemeMode
+import com.example.vitanlyapp.domain.model.TilePosition
 import com.example.vitanlyapp.domain.model.UserGoal
 import com.example.vitanlyapp.domain.repository.ChatMessageDomain
 import com.example.vitanlyapp.domain.repository.ChatRepository
@@ -186,6 +188,8 @@ class ChatAIAdapter @Inject constructor(
 
         return """
             |Ты — AI-помощник приложения VitanlyApp для подсчёта калорий и КБЖУ.
+            |Ты ВСТРОЕН в приложение и НАПРЯМУЮ им управляешь. Ты НЕ отправляешь команды — ты ВЫПОЛНЯЕШЬ действия.
+            |Сегодняшняя дата: ${java.time.LocalDate.now()}
             |
             |$profileInfo
             |
@@ -200,22 +204,35 @@ class ChatAIAdapter @Inject constructor(
             |  ]
             |}
             |
-            |КОМАНДЫ:
-            |Профиль: set_weight (кг), set_height (см), set_age (лет), set_gender (male/female), set_activity (sedentary/light/moderate/active/very_active)
-            |Цели: set_goal (lose/gain/maintain), set_target_weight (кг), set_tempo (кг/неделя)
-            |Еда: add_food (добавить из food_entries), delete_food (name: название), delete_meal (session_id: ID приёма пищи), clear_day (очистить день)
+            |ТВОИ ВОЗМОЖНОСТИ (используй commands):
+            |Профиль: set_weight, set_height, set_age, set_gender (male/female), set_activity (sedentary/light/moderate/active/very_active)
+            |Цели: set_goal (lose/gain/maintain), set_target_weight, set_tempo
+            |Еда: add_food, delete_food (name), delete_meal (session_id), clear_day, delete_day (date: yyyy-MM-dd)
+            |Тема: set_theme (classic = светлая, warm_dark = тёмная)
+            |Интерфейс: clear_chat, open_tile (top/middle/bottom), close_tile
+            |Данные: reset_profile, reset_all_data (ТОЛЬКО после подтверждения!)
             |
-            |ПРАВИЛА:
-            |1. response_text — ОБЯЗАТЕЛЕН, это текст для чата
-            |2. food_entries — массив продуктов (может быть пустым)
-            |3. commands — массив команд (может быть пустым)
-            |4. Если пользователь описал еду — добавь в food_entries + команду add_food
-            |5. Если пользователь меняет параметры — добавь соответствующие команды
-            |6. Для обычных вопросов — только response_text
-            |7. БЖУ указывай на основе знаний о нутриентах продуктов
-            |8. Для каждого продукта добавь подходящий emoji (🍳 яичница, 🥗 салат, 🍕 пицца и т.д.)
-            |9. Отвечай дружелюбно, кратко и по делу
-            |10. Если пользователь говорит на русском — отвечай на русском
+            |ВАЖНЫЕ ПРАВИЛА ОБЩЕНИЯ:
+            |1. Ты НАПРЯМУЮ управляешь приложением — НИКОГДА не говори "я отправлю команду", "я не могу напрямую"
+            |2. Говори уверенно: "Готово!", "Сделано!", "Включил!", "Записал!" — ты ЭТО ДЕЛАЕШЬ
+            |3. НЕ используй технические названия (warm_dark, classic, top, middle, bottom) — говори по-человечески
+            |4. Тема: "тёмная тема" и "светлая тема" — НЕ warm_dark/classic
+            |5. Плитки: "верхняя", "средняя", "нижняя" — НЕ top/middle/bottom
+            |6. Активность: "низкая", "умеренная", "высокая" — НЕ sedentary/moderate/active
+            |7. Отвечай КРАТКО и дружелюбно
+            |8. Если пользователь говорит на русском — отвечай на русском
+            |9. Для каждого продукта добавь emoji (🍳🥗🍕🍎 и т.д.)
+            |10. Перед reset_all_data ОБЯЗАТЕЛЬНО спроси подтверждение
+            |
+            |ПРИМЕРЫ ПРАВИЛЬНЫХ ОТВЕТОВ:
+            |"Поменяй тему" → "Готово! Включил тёмную тему 🌙" + команда set_theme
+            |"Удали вчерашнее" → "Удалил все записи за вчера!" + команда delete_day
+            |"Открой статистику" → "Открыл!" + команда open_tile
+            |
+            |ПРИМЕРЫ НЕПРАВИЛЬНЫХ ОТВЕТОВ (НИКОГДА так не говори):
+            |❌ "Я не могу напрямую менять тему, но могу отправить команду..."
+            |❌ "Переключаю на тему warm_dark"
+            |❌ "Открываю плитку top"
         """.trimMargin()
     }
 
@@ -346,7 +363,47 @@ class ChatAIAdapter @Inject constructor(
             "delete_food" -> AgentCommand.DeleteFood(json.optString("name", ""))
             "delete_meal" -> AgentCommand.DeleteMeal(json.optLong("session_id", 0L))
             "clear_day" -> AgentCommand.ClearDay
+            "delete_day" -> AgentCommand.DeleteDay(json.optString("date", ""))
 
+            // Команды управления приложением
+            "set_theme" -> {
+                val value = json.optString("value", "")
+                parseThemeMode(value)?.let { AgentCommand.SetTheme(it) }
+            }
+            "clear_chat" -> AgentCommand.ClearChat
+            "open_tile" -> {
+                val position = json.optString("position", "")
+                parseTilePosition(position)?.let { AgentCommand.OpenTile(it) }
+            }
+            "close_tile" -> AgentCommand.CloseTile
+
+            // Команды сброса данных
+            "reset_profile" -> AgentCommand.ResetProfile
+            "reset_all_data" -> AgentCommand.ResetAllData
+
+            else -> null
+        }
+    }
+
+    /**
+     * Парсит значение ThemeMode из строки.
+     */
+    private fun parseThemeMode(value: String): ThemeMode? {
+        return when (value.lowercase()) {
+            "classic" -> ThemeMode.CLASSIC
+            "warm_dark" -> ThemeMode.WARM_DARK
+            else -> null
+        }
+    }
+
+    /**
+     * Парсит значение TilePosition из строки.
+     */
+    private fun parseTilePosition(value: String): TilePosition? {
+        return when (value.lowercase()) {
+            "top" -> TilePosition.TOP
+            "middle" -> TilePosition.MIDDLE
+            "bottom" -> TilePosition.BOTTOM
             else -> null
         }
     }

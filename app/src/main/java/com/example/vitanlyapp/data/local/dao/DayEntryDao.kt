@@ -80,9 +80,16 @@ interface DayEntryDao {
 
     /**
      * Очистить все записи за указанную дату.
+     * @return количество удалённых записей
      */
     @Query("DELETE FROM day_entries WHERE date = :date")
-    suspend fun clearDay(date: String)
+    suspend fun clearDay(date: String): Int
+
+    /**
+     * Получить количество записей за указанную дату.
+     */
+    @Query("SELECT COUNT(*) FROM day_entries WHERE date = :date")
+    suspend fun getCountForDate(date: String): Int
 
     /**
      * Получить сумму калорий за день.
