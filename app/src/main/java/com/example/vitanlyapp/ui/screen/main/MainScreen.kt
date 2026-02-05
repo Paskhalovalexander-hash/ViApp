@@ -462,6 +462,7 @@ private fun CompactLayout(
         ) {
             BottomTileContent(
                 messages = chatMessages,
+                isLoading = chatLoading,
                 isCollapsed = !chatExpanded,
                 bottomPadding = safeBottomDp,
                 onHintClick = { hint -> chatPrefillText = hint }
@@ -615,6 +616,7 @@ private fun ExpandedLayout(
             ) {
                 BottomTileContent(
                     messages = chatMessages,
+                    isLoading = chatLoading,
                     isCollapsed = false,
                     onHintClick = { hint -> chatPrefillText = hint }
                 )

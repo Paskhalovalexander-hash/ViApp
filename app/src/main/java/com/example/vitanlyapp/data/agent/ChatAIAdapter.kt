@@ -49,7 +49,7 @@ class ChatAIAdapter @Inject constructor(
         private const val CONTEXT_MESSAGES_LIMIT = 10
         private const val CONNECT_TIMEOUT = 30_000
         private const val READ_TIMEOUT = 60_000
-        private const val MAX_RETRY_ATTEMPTS = 3
+        private const val MAX_RETRY_ATTEMPTS = 5
         private const val RETRY_DELAY_MS = 1000L
     }
 
@@ -110,9 +110,9 @@ class ChatAIAdapter @Inject constructor(
                 return@withContext Result.success(agentResponse)
             } catch (e: Exception) {
                 lastException = e
-                // Если ошибка retryable и есть ещё попытки — повторяем с задержкой
-                if (isRetryableParsingError(e) && attempt < MAX_RETRY_ATTEMPTS - 1) {
-                    delay(RETRY_DELAY_MS)
+                // Если ошибка retryable и есть ещё попытки — повторяем с экспоненциальной задержкой
+                if (isRetryableError(e) && attempt < MAX_RETRY_ATTEMPTS - 1) {
+                    delay(RETRY_DELAY_MS * (attempt + 1))
                 } else {
                     // Не retryable или последняя попытка — выходим из цикла
                     return@repeat
@@ -121,10 +121,7 @@ class ChatAIAdapter @Inject constructor(
         }
 
         // Все попытки исчерпаны или ошибка не retryable
-        val errorResponse = AgentResponse.error(lastException?.message ?: "Неизвестная ошибка")
-        if (saveToHistory) {
-            chatRepository.addAssistantMessage(errorResponse.responseText)
-        }
+        // НЕ сохраняем ошибку в историю — пользователь не должен видеть ошибки
         Result.failure(lastException ?: Exception("Неизвестная ошибка"))
     }
 
@@ -409,14 +406,13 @@ class ChatAIAdapter @Inject constructor(
     }
 
     /**
-     * Проверяет, является ли ошибка retryable (ошибка парсинга JSON).
-     * Такие ошибки возникают, когда API возвращает обрезанный/неполный JSON.
+     * Проверяет, является ли ошибка retryable.
+     * Ретраим все ошибки кроме отсутствия API ключа (IllegalStateException).
+     * Это позволяет автоматически восстанавливаться от временных сбоев API.
      */
-    private fun isRetryableParsingError(e: Exception): Boolean {
-        val message = e.message ?: return false
-        return message.contains("end of input", ignoreCase = true) ||
-               message.contains("Unterminated", ignoreCase = true) ||
-               e is JSONException
+    private fun isRetryableError(e: Exception): Boolean {
+        // Не ретраим только отсутствие API ключа
+        return e !is IllegalStateException
     }
 
     /**

@@ -4,7 +4,6 @@ import android.os.Build
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -33,8 +32,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
@@ -43,6 +42,7 @@ import androidx.compose.ui.unit.dp
 import com.example.vitanlyapp.domain.model.ChatMessage
 import com.example.vitanlyapp.domain.model.ChatRole
 import com.example.vitanlyapp.ui.component.ChatHintsCarousel
+import com.example.vitanlyapp.ui.component.LoadingBubble
 import com.example.vitanlyapp.ui.component.TileBackground
 import com.example.vitanlyapp.ui.design.DesignTokens
 import com.example.vitanlyapp.ui.design.LocalAppColorScheme
@@ -91,8 +91,10 @@ fun ChatBubble(
  * Блок ввода вынесен отдельно в ChatInputBlock для фиксированной позиции.
  * 
  * Когда чат пустой и раскрыт — показывает карусель подсказок.
+ * Когда идёт загрузка — показывает LoadingBubble с анимацией.
  *
  * @param messages Список сообщений чата
+ * @param isLoading Идёт ли загрузка ответа от LLM
  * @param isCollapsed Свёрнута ли плитка
  * @param bottomPadding Отступ снизу (для safe area)
  * @param onHintClick Callback при клике на подсказку (для автозаполнения поля ввода)
@@ -101,6 +103,7 @@ fun ChatBubble(
 @Composable
 fun BottomTileContent(
     messages: List<ChatMessage>,
+    isLoading: Boolean = false,
     isCollapsed: Boolean = false,
     bottomPadding: Dp = 0.dp,
     onHintClick: (String) -> Unit = {},
@@ -110,16 +113,11 @@ fun BottomTileContent(
 
     val listState = rememberLazyListState()
 
-    LaunchedEffect(messages.size) {
-        if (messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size - 1)
-        }
-    }
-
     // Контент чата — только когда раскрыто
     if (!isCollapsed) {
         if (messages.isEmpty()) {
             // Пустой чат — показываем карусель подсказок
+            // Подсказки остаются по центру, не зависят от клавиатуры
             Box(
                 modifier = modifier
                     .fillMaxSize()
@@ -132,6 +130,8 @@ fun BottomTileContent(
             }
         } else {
             // Есть сообщения — показываем список
+            // Используем reverseLayout = true — стандартный паттерн для чатов:
+            // последние сообщения автоматически видны внизу
             Column(
                 modifier = modifier
                     .fillMaxSize()
@@ -142,14 +142,25 @@ fun BottomTileContent(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxWidth(),
+                    reverseLayout = true,
                     contentPadding = PaddingValues(
                         top = 4.dp,
                         bottom = DesignTokens.chatInputBlockHeight + 32.dp + bottomPadding
-                    ),
-                    verticalArrangement = Arrangement.Bottom
+                    )
                 ) {
+                    // При reverseLayout первый item отображается внизу
+                    // Поэтому сначала loading (будет внизу), потом сообщения в обратном порядке
+                    
+                    // Индикатор загрузки — внизу списка (первый при reverseLayout)
+                    if (isLoading) {
+                        item(key = "loading") {
+                            LoadingBubble()
+                        }
+                    }
+                    
+                    // Сообщения в обратном порядке (последнее сообщение = первый item = внизу)
                     items(
-                        items = messages,
+                        items = messages.asReversed(),
                         key = { msg -> "${msg.role}-${msg.text.hashCode()}" }
                     ) { message ->
                         ChatBubble(message = message)

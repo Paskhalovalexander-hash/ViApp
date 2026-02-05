@@ -161,10 +161,9 @@ class MainViewModel @Inject constructor(
                     )
                 }
                 is OrchestratorResult.Error -> {
-                    _chatMessages.value = _chatMessages.value + ChatMessage(
-                        ChatRole.ASSISTANT,
-                        "Ошибка: ${result.message}"
-                    )
+                    // Не показываем ошибки пользователю — retry логика в ChatAIAdapter
+                    // должна справиться с временными сбоями. Если все попытки исчерпаны,
+                    // пользователь просто не получит ответ (лучше чем показывать ошибку).
                 }
             }
 
