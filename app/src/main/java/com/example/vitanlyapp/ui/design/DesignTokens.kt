@@ -171,7 +171,7 @@ object DesignTokens {
     const val tileWeightIdleBottom: Float = 0.18f  // BOTTOM минимальный
 
     // Высота минимальной плитки чата (только строка ввода)
-    val chatTileMinHeight: Dp = 70.dp
+    val chatTileMinHeight: Dp = 80.dp
 
     // Форма нижней плитки — скругление только сверху, снизу уходит за экран
     val bottomTileCornerRadius: Dp = 24.dp
@@ -189,7 +189,7 @@ object DesignTokens {
     val chatBubbleUserBackground: Color = Color(0xFFE8C4B8)
     val chatBubbleAssistantBackground: Color = surfaceInput
     val chatInputBlockHeight: Dp = 54.dp
-    val chatInputBlockCornerRadius: Dp = 12.dp
+    val chatInputBlockCornerRadius: Dp = 18.dp
     val chatInputBlockBackground: Color = Color(0xBFE0B8AC)
 
     // ==================== КАСТОМНЫЕ ФОРМЫ ====================

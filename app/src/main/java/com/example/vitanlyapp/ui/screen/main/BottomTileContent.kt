@@ -159,7 +159,7 @@ fun BottomTileContent(
                         .fillMaxWidth(),
                     contentPadding = PaddingValues(
                         top = 4.dp,
-                        bottom = DesignTokens.chatInputBlockHeight + 12.dp + bottomPadding // Отступ под блок ввода
+                        bottom = DesignTokens.chatInputBlockHeight + 20.dp + bottomPadding // 10dp отступ от строки ввода
                     ),
                     // Сообщения прижаты к низу — новые внизу, старые поднимаются вверх
                     verticalArrangement = Arrangement.Bottom
@@ -183,12 +183,13 @@ fun BottomTileContent(
                     if (isCollapsed) {
                         Modifier
                             .padding(horizontal = DesignTokens.tilePadding)
-                            .padding(bottom = bottomPadding)
+                            .padding(bottom = 10.dp + bottomPadding)
                     } else {
                         Modifier
                             .align(Alignment.BottomCenter)
                             .padding(horizontal = DesignTokens.tilePadding)
-                            .padding(bottom = 8.dp + bottomPadding)
+                            // Гарантированный отступ от навигации Android
+                            .padding(bottom = (10.dp + bottomPadding).coerceAtLeast(24.dp))
                     }
                 )
                 .height(DesignTokens.chatInputBlockHeight)
