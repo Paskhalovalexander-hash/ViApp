@@ -166,6 +166,16 @@ object DesignTokens {
     const val tileWeightCollapsed: Float = 0.8f
     const val tileAlphaCollapsed: Float = 0.85f
 
+    // Веса для idle-состояния (ни одна плитка не активна)
+    const val tileWeightIdleTopMiddle: Float = 1f  // TOP и MIDDLE равные
+    const val tileWeightIdleBottom: Float = 0.18f  // BOTTOM минимальный
+
+    // Высота минимальной плитки чата (только строка ввода)
+    val chatTileMinHeight: Dp = 70.dp
+
+    // Форма нижней плитки — скругление только сверху, снизу уходит за экран
+    val bottomTileCornerRadius: Dp = 24.dp
+
     // ==================== ТЕНИ ====================
 
     // Значения теней для плиток (elevation)

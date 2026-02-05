@@ -62,6 +62,7 @@ private fun <T> tileAnimationSpec() = tween<T>(
  * @param backgroundColor Цвет фона (используется если backgroundBrush = null)
  * @param hazeState Состояние Haze для glassmorphism (если null — blur отключён)
  * @param blurRadius Радиус размытия для glassmorphism
+ * @param edgeToEdge Без внутреннего padding (для edge-to-edge плиток)
  * @param content Контент плитки
  * @param overflowContent Опциональный контент без clip (для wheel picker overflow)
  */
@@ -77,6 +78,7 @@ fun Tile(
     backgroundColor: Color = LocalAppColorScheme.current.surfaceMain,
     hazeState: HazeState? = null,
     blurRadius: Dp = DesignTokens.blurRadius,
+    edgeToEdge: Boolean = false,
     overflowContent: @Composable (() -> Unit)? = null,
     content: @Composable () -> Unit
 ) {
@@ -132,7 +134,7 @@ fun Tile(
         modifier = modifier
             .fillMaxWidth()
             .fillMaxSize()
-            .padding(DesignTokens.tileSpacing / 2)
+            .then(if (!edgeToEdge) Modifier.padding(DesignTokens.tileSpacing / 2) else Modifier)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null

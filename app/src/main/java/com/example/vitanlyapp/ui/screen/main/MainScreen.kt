@@ -1,5 +1,6 @@
 package com.example.vitanlyapp.ui.screen.main
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -18,7 +19,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.windowInsetsPadding
@@ -87,6 +90,11 @@ fun MainScreen(
         ThemeMode.CLASSIC -> AppColorSchemes.Classic
         ThemeMode.WARM_DARK -> AppColorSchemes.WarmDark
     }
+    
+    // Жест "назад" сворачивает плитку вместо закрытия приложения
+    BackHandler(enabled = activeTile != null) {
+        viewModel.onTileClick(activeTile!!) // Повторный клик сворачивает плитку
+    }
 
     // Делаем иконки строки состояния читаемыми: тёмные на светлом фоне (Classic), светлые на тёмном (WarmDark)
     val view = LocalView.current
@@ -148,16 +156,29 @@ fun MainScreen(
         )
     }
 
+    // Новая логика весов: в idle TOP и MIDDLE равные и большие, BOTTOM минимальный
     val weightTop by animateFloatAsState(
-        targetValue = if (activeTile == TilePosition.TOP) DesignTokens.tileWeightExpanded else DesignTokens.tileWeightCollapsed,
+        targetValue = when {
+            activeTile == TilePosition.TOP -> DesignTokens.tileWeightExpanded
+            activeTile != null -> DesignTokens.tileWeightCollapsed
+            else -> DesignTokens.tileWeightIdleTopMiddle  // idle = 1f
+        },
         animationSpec = tileAnimationSpec
     )
     val weightMiddle by animateFloatAsState(
-        targetValue = if (activeTile == TilePosition.MIDDLE) DesignTokens.tileWeightExpanded else DesignTokens.tileWeightCollapsed,
+        targetValue = when {
+            activeTile == TilePosition.MIDDLE -> DesignTokens.tileWeightExpanded
+            activeTile != null -> DesignTokens.tileWeightCollapsed
+            else -> DesignTokens.tileWeightIdleTopMiddle  // idle = 1f
+        },
         animationSpec = tileAnimationSpec
     )
     val weightBottom by animateFloatAsState(
-        targetValue = if (activeTile == TilePosition.BOTTOM) DesignTokens.tileWeightExpanded else DesignTokens.tileWeightCollapsed,
+        targetValue = when {
+            activeTile == TilePosition.BOTTOM -> DesignTokens.tileWeightExpanded
+            activeTile != null -> DesignTokens.tileWeightCollapsed
+            else -> DesignTokens.tileWeightIdleBottom  // idle = 0.18f
+        },
         animationSpec = tileAnimationSpec
     )
 
@@ -180,15 +201,15 @@ fun MainScreen(
                 )
         ) {
         BoxWithConstraints(
-            modifier = Modifier
-                .windowInsetsPadding(WindowInsets.safeDrawing)
-                .fillMaxSize()
-                .padding(DesignTokens.screenPadding)
+            modifier = Modifier.fillMaxSize()
         ) {
+            // Safe area insets — применяем только к верхним плиткам, нижняя игнорирует
+            val density = LocalDensity.current
+            val safeTop = WindowInsets.safeDrawing.getTop(density)
+            val safeBottom = WindowInsets.safeDrawing.getBottom(density)
             val isExpandedLayout = maxWidth >= DesignTokens.expandedLayoutBreakpoint
 
             // Отслеживание клавиатуры
-            val density = LocalDensity.current
             val imeBottom = WindowInsets.ime.getBottom(density)
             val isKeyboardVisible = imeBottom > 0
 
@@ -213,9 +234,10 @@ fun MainScreen(
                     CompactLayout(
                         weightTop = weightTop,
                         weightMiddle = weightMiddle,
-                        weightBottom = weightBottom,
                         activeTile = activeTile,
                         isKeyboardVisible = isKeyboardVisible,
+                        safeTopPx = safeTop,
+                        safeBottomPx = safeBottom,
                         kcalStat = kcalStat,
                         macroStats = macroStats,
                         currentWeight = currentWeight,
@@ -278,13 +300,22 @@ fun MainScreen(
     }
 }
 
+// Форма нижней плитки — скругление только сверху
+private val bottomTileShape = RoundedCornerShape(
+    topStart = DesignTokens.bottomTileCornerRadius,
+    topEnd = DesignTokens.bottomTileCornerRadius,
+    bottomStart = 0.dp,
+    bottomEnd = 0.dp
+)
+
 @Composable
 private fun CompactLayout(
     weightTop: Float,
     weightMiddle: Float,
-    weightBottom: Float,
     activeTile: TilePosition?,
     isKeyboardVisible: Boolean,
+    safeTopPx: Int,
+    safeBottomPx: Int,
     kcalStat: KbjuBarStat,
     macroStats: List<KbjuBarStat>,
     currentWeight: Float,
@@ -296,81 +327,102 @@ private fun CompactLayout(
     onEntryClick: (DayEntry) -> Unit,
     viewModel: MainViewModel
 ) {
+    val density = LocalDensity.current
+    
     // HazeState для glassmorphism плашек веса/активности в верхней плитке
     val kbjuHazeState = rememberHazeState()
 
     // Когда клавиатура видна и чат раскрыт — плитка чата перекрывает остальные
     val chatFullScreen = isKeyboardVisible && activeTile == TilePosition.BOTTOM
+    
+    // Чат раскрыт (не свёрнут)
+    val chatExpanded = activeTile == TilePosition.BOTTOM || chatFullScreen
+    
+    // Высота нижней плитки: фиксированная в idle, fullscreen при раскрытии
+    // Включает safe area снизу чтобы уходить за край экрана
+    val safeBottomDp = with(density) { safeBottomPx.toDp() }
+    val safeTopDp = with(density) { safeTopPx.toDp() }
+    
+    // Минимальная высота плитки чата (включая safe area снизу)
+    val chatMinHeight = DesignTokens.chatTileMinHeight + safeBottomDp
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Слой 1: верхние плитки (TOP и MIDDLE)
-        Column(modifier = Modifier.fillMaxSize()) {
-            Tile(
-                position = TilePosition.TOP,
-                isExpanded = activeTile == TilePosition.TOP,
-                isCollapsed = activeTile != null && activeTile != TilePosition.TOP,
-                onClick = { viewModel.onTileClick(TilePosition.TOP) },
-                modifier = Modifier.weight(weightTop),
-                overflowContent = {
-                    KbjuTileWheelOverflowContent(
-                        isExpanded = activeTile == TilePosition.TOP,
-                        currentWeight = currentWeight,
-                        onWeightChange = viewModel::updateWeight,
-                        activityCoefficient = activityCoefficient,
-                        onActivityChange = viewModel::updateActivityCoefficient,
+        // Слой 1: верхние плитки (TOP и MIDDLE) — скрыты когда чат раскрыт
+        if (!chatExpanded) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = DesignTokens.screenPadding)
+                    .padding(top = safeTopDp + DesignTokens.screenPadding)
+                    .padding(bottom = chatMinHeight)
+            ) {
+                Tile(
+                    position = TilePosition.TOP,
+                    isExpanded = activeTile == TilePosition.TOP,
+                    isCollapsed = activeTile != null && activeTile != TilePosition.TOP,
+                    onClick = { viewModel.onTileClick(TilePosition.TOP) },
+                    modifier = Modifier.weight(weightTop),
+                    overflowContent = {
+                        KbjuTileWheelOverflowContent(
+                            isExpanded = activeTile == TilePosition.TOP,
+                            currentWeight = currentWeight,
+                            onWeightChange = viewModel::updateWeight,
+                            activityCoefficient = activityCoefficient,
+                            onActivityChange = viewModel::updateActivityCoefficient,
+                            hazeState = kbjuHazeState
+                        )
+                    }
+                ) {
+                    KbjuTileContent(
+                        kcalStat = kcalStat,
+                        macroStats = macroStats,
+                        activeTile = activeTile,
+                        userProfile = userProfile,
                         hazeState = kbjuHazeState
                     )
                 }
-            ) {
-                KbjuTileContent(
-                    kcalStat = kcalStat,
-                    macroStats = macroStats,
-                    activeTile = activeTile,
-                    userProfile = userProfile,
-                    hazeState = kbjuHazeState
-                )
-            }
 
-            Tile(
-                position = TilePosition.MIDDLE,
-                isExpanded = activeTile == TilePosition.MIDDLE,
-                isCollapsed = activeTile != null && activeTile != TilePosition.MIDDLE,
-                onClick = { viewModel.onTileClick(TilePosition.MIDDLE) },
-                modifier = Modifier.weight(weightMiddle)
-            ) {
-                InputTileContent(
-                    entries = todayEntries,
+                Tile(
+                    position = TilePosition.MIDDLE,
+                    isExpanded = activeTile == TilePosition.MIDDLE,
                     isCollapsed = activeTile != null && activeTile != TilePosition.MIDDLE,
-                    onEntryClick = onEntryClick
-                )
-            }
-
-            // Пустое место для плитки чата когда она не fullscreen
-            if (!chatFullScreen) {
-                Box(modifier = Modifier.weight(weightBottom))
+                    onClick = { viewModel.onTileClick(TilePosition.MIDDLE) },
+                    modifier = Modifier.weight(weightMiddle)
+                ) {
+                    InputTileContent(
+                        entries = todayEntries,
+                        isCollapsed = activeTile != null && activeTile != TilePosition.MIDDLE,
+                        onEntryClick = onEntryClick
+                    )
+                }
             }
         }
 
-        // Слой 2: плитка чата — всегда одна и та же (сохраняет фокус)
-        // При chatFullScreen — на весь экран, иначе — внизу с весом
+        // Слой 2: плитка чата — edge-to-edge, уходит за нижний край экрана
+        // При раскрытии — на весь экран (fullscreen), иначе — фиксированная минимальная высота
         Tile(
             position = TilePosition.BOTTOM,
-            isExpanded = activeTile == TilePosition.BOTTOM || chatFullScreen,
-            isCollapsed = activeTile != null && activeTile != TilePosition.BOTTOM && !chatFullScreen,
+            isExpanded = chatExpanded,
+            isCollapsed = false, // Нижняя плитка никогда не "схлопывается" визуально
             onClick = { viewModel.onTileClick(TilePosition.BOTTOM) },
-            modifier = if (chatFullScreen) {
+            shape = if (chatExpanded) RoundedCornerShape(0.dp) else bottomTileShape,
+            edgeToEdge = true,
+            modifier = if (chatExpanded) {
                 Modifier.fillMaxSize()
             } else {
                 Modifier
                     .fillMaxWidth()
                     .align(Alignment.BottomCenter)
-                    .fillMaxHeight(weightBottom / (weightTop + weightMiddle + weightBottom))
+                    .height(chatMinHeight)
             }
         ) {
             BottomTileContent(
                 messages = chatMessages,
                 onSendMessage = viewModel::sendChatMessage,
-                isLoading = chatLoading
+                isLoading = chatLoading,
+                isCollapsed = !chatExpanded,
+                bottomPadding = safeBottomDp,
+                onExpandRequest = { viewModel.onTileClick(TilePosition.BOTTOM) }
             )
         }
     }
