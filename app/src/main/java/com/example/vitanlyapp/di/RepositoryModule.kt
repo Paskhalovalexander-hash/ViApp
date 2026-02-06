@@ -4,11 +4,13 @@ import com.example.vitanlyapp.data.repository.ChatRepositoryImpl
 import com.example.vitanlyapp.data.repository.DayEntryRepositoryImpl
 import com.example.vitanlyapp.data.repository.PersistentKbjuRepository
 import com.example.vitanlyapp.data.repository.PreferencesThemeRepository
+import com.example.vitanlyapp.data.repository.UpdateRepositoryImpl
 import com.example.vitanlyapp.data.repository.UserProfileRepositoryImpl
 import com.example.vitanlyapp.domain.repository.ChatRepository
 import com.example.vitanlyapp.domain.repository.DayEntryRepository
 import com.example.vitanlyapp.domain.repository.KbjuRepository
 import com.example.vitanlyapp.domain.repository.ThemeRepository
+import com.example.vitanlyapp.domain.repository.UpdateRepository
 import com.example.vitanlyapp.domain.repository.UserProfileRepository
 import dagger.Binds
 import dagger.Module
@@ -54,4 +56,10 @@ abstract class RepositoryModule {
     abstract fun bindChatRepository(
         impl: ChatRepositoryImpl
     ): ChatRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindUpdateRepository(
+        impl: UpdateRepositoryImpl
+    ): UpdateRepository
 }

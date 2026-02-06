@@ -36,6 +36,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -48,6 +49,7 @@ import android.app.Activity
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -63,6 +65,8 @@ import com.example.vitanlyapp.ui.component.Tile
 import com.example.vitanlyapp.ui.design.AppColorSchemes
 import com.example.vitanlyapp.ui.design.DesignTokens
 import com.example.vitanlyapp.ui.design.LocalAppColorScheme
+import com.example.vitanlyapp.ui.update.UpdateDialog
+import com.example.vitanlyapp.ui.update.UpdateViewModel
 import dev.chrisbanes.haze.rememberHazeState
 
 // Плавное замедление в конце: cubic-bezier(0.22, 0.61, 0.36, 1)
@@ -76,6 +80,7 @@ private fun <T> tileAnimationSpec() = tween<T>(
 @Composable
 fun MainScreen(
     viewModel: MainViewModel = hiltViewModel(),
+    updateViewModel: UpdateViewModel = hiltViewModel(),
     onResetData: () -> Unit = {}
 ) {
     val activeTile by viewModel.activeTile.collectAsStateWithLifecycle()
@@ -92,6 +97,14 @@ fun MainScreen(
         ThemeMode.CLASSIC -> AppColorSchemes.Classic
         ThemeMode.WARM_DARK -> AppColorSchemes.WarmDark
     }
+
+    // Проверка обновлений при запуске
+    LaunchedEffect(Unit) {
+        updateViewModel.checkForUpdates()
+    }
+
+    // Диалог обновления
+    UpdateDialog(viewModel = updateViewModel)
     
     // Жест "назад" сворачивает плитку вместо закрытия приложения
     BackHandler(enabled = activeTile != null) {
@@ -208,12 +221,16 @@ fun MainScreen(
             // Safe area insets — применяем только к верхним плиткам, нижняя игнорирует
             val density = LocalDensity.current
             val safeTop = WindowInsets.safeDrawing.getTop(density)
-            val safeBottom = WindowInsets.safeDrawing.getBottom(density)
             val isExpandedLayout = maxWidth >= DesignTokens.expandedLayoutBreakpoint
 
-            // Отслеживание клавиатуры
+            // Отслеживание клавиатуры и нижнего safe area
             val imeBottom = WindowInsets.ime.getBottom(density)
+            val navBottom = WindowInsets.navigationBars.getBottom(density)
             val isKeyboardVisible = imeBottom > 0
+            
+            // Когда клавиатура открыта — используем её высоту, иначе — navigation bar
+            // Это решает проблему на Huawei где safeDrawing возвращает неправильные значения
+            val safeBottom = if (isKeyboardVisible) imeBottom else navBottom
 
             if (isExpandedLayout) {
                 ExpandedLayout(
