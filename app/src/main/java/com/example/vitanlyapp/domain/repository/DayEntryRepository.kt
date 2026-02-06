@@ -42,6 +42,14 @@ interface DayEntryRepository {
     suspend fun addEntries(entries: List<FoodEntry>)
 
     /**
+     * Добавить несколько записей о еде за указанную дату.
+     * Используется для тестовых данных и импорта.
+     * @param date дата в формате "yyyy-MM-dd"
+     * @param entries список записей о еде
+     */
+    suspend fun addEntriesForDate(date: String, entries: List<FoodEntry>)
+
+    /**
      * Удалить запись по id.
      */
     suspend fun deleteEntry(id: Long)
@@ -95,6 +103,13 @@ interface DayEntryRepository {
      * @return обновлённая запись или null если не найдена
      */
     suspend fun updateEntryWeight(id: Long, newWeightGrams: Int): DayEntry?
+
+    /**
+     * Получить все уникальные даты с записями как Flow.
+     * Даты отсортированы по убыванию (новые первые).
+     * Используется для навигации по дням на плитке продуктов.
+     */
+    fun getAllDatesFlow(): Flow<List<String>>
 }
 
 /**

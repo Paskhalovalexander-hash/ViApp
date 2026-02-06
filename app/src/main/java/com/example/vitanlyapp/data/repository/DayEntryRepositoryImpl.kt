@@ -69,6 +69,12 @@ class DayEntryRepositoryImpl @Inject constructor(
         dayEntryDao.insertAll(entities)
     }
 
+    override suspend fun addEntriesForDate(date: String, entries: List<FoodEntry>) {
+        val sessionId = System.currentTimeMillis()
+        val entities = entries.map { it.toEntity(date, sessionId) }
+        dayEntryDao.insertAll(entities)
+    }
+
     /**
      * Определяет mealSessionId для новой записи.
      * Если есть записи за последние 30 минут - использует их sessionId.
@@ -197,4 +203,6 @@ class DayEntryRepositoryImpl @Inject constructor(
         emoji = emoji,
         mealSessionId = mealSessionId
     )
+
+    override fun getAllDatesFlow(): Flow<List<String>> = dayEntryDao.getAllDatesFlow()
 }

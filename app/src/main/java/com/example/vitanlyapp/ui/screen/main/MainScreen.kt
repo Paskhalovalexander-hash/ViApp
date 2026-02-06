@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteForever
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.Science
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -49,6 +50,7 @@ import android.app.Activity
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.foundation.layout.ime
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
@@ -90,8 +92,11 @@ fun MainScreen(
     val chatMessages by viewModel.chatMessages.collectAsStateWithLifecycle()
     val chatLoading by viewModel.chatLoading.collectAsStateWithLifecycle()
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
-    val todayEntries by viewModel.todayEntries.collectAsStateWithLifecycle()
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
+    
+    // Навигация по дням на средней плитке
+    val selectedDayEntries by viewModel.selectedDayEntries.collectAsStateWithLifecycle()
+    val availableDates by viewModel.availableDates.collectAsStateWithLifecycle()
 
     val scheme = when (themeMode) {
         ThemeMode.CLASSIC -> AppColorSchemes.Classic
@@ -223,14 +228,13 @@ fun MainScreen(
             val safeTop = WindowInsets.safeDrawing.getTop(density)
             val isExpandedLayout = maxWidth >= DesignTokens.expandedLayoutBreakpoint
 
-            // Отслеживание клавиатуры и нижнего safe area
+            // Отслеживание клавиатуры
             val imeBottom = WindowInsets.ime.getBottom(density)
-            val navBottom = WindowInsets.navigationBars.getBottom(density)
             val isKeyboardVisible = imeBottom > 0
             
-            // Когда клавиатура открыта — используем её высоту, иначе — navigation bar
-            // Это решает проблему на Huawei где safeDrawing возвращает неправильные значения
-            val safeBottom = if (isKeyboardVisible) imeBottom else navBottom
+            // Для нижнего safe area используем navigationBars (не safeDrawing!)
+            // safeDrawing на Huawei возвращает неправильные значения
+            val safeBottom = WindowInsets.navigationBars.getBottom(density)
 
             if (isExpandedLayout) {
                 ExpandedLayout(
@@ -243,7 +247,8 @@ fun MainScreen(
                     activityCoefficient = activityCoefficient,
                     chatMessages = chatMessages,
                     chatLoading = chatLoading,
-                    todayEntries = todayEntries,
+                    selectedDayEntries = selectedDayEntries,
+                    availableDates = availableDates,
                     userProfile = userProfile,
                     onEntryClick = { selectedEntry = it },
                     onShowResetDialog = { showResetDialog = true },
@@ -258,13 +263,15 @@ fun MainScreen(
                     isKeyboardVisible = isKeyboardVisible,
                     safeTopPx = safeTop,
                     safeBottomPx = safeBottom,
+                    imeBottomPx = imeBottom,
                     kcalStat = kcalStat,
                     macroStats = macroStats,
                     currentWeight = currentWeight,
                     activityCoefficient = activityCoefficient,
                     chatMessages = chatMessages,
                     chatLoading = chatLoading,
-                    todayEntries = todayEntries,
+                    selectedDayEntries = selectedDayEntries,
+                    availableDates = availableDates,
                     userProfile = userProfile,
                     onEntryClick = { selectedEntry = it },
                     onShowResetDialog = { showResetDialog = true },
@@ -293,13 +300,15 @@ private fun CompactLayout(
     isKeyboardVisible: Boolean,
     safeTopPx: Int,
     safeBottomPx: Int,
+    imeBottomPx: Int,
     kcalStat: KbjuBarStat,
     macroStats: List<KbjuBarStat>,
     currentWeight: Float,
     activityCoefficient: Float,
     chatMessages: List<ChatMessage>,
     chatLoading: Boolean,
-    todayEntries: List<DayEntry>,
+    selectedDayEntries: List<DayEntry>,
+    availableDates: List<String>,
     userProfile: UserProfile?,
     onEntryClick: (DayEntry) -> Unit,
     onShowResetDialog: () -> Unit,
@@ -324,6 +333,7 @@ private fun CompactLayout(
     // Включает safe area снизу чтобы уходить за край экрана
     val safeBottomDp = with(density) { safeBottomPx.toDp() }
     val safeTopDp = with(density) { safeTopPx.toDp() }
+    val imeBottomDp = with(density) { imeBottomPx.toDp() }
     
     // Минимальная высота плитки чата (включая safe area снизу)
     val chatMinHeight = DesignTokens.chatTileMinHeight + safeBottomDp
@@ -441,6 +451,24 @@ private fun CompactLayout(
                                         modifier = Modifier.size(22.dp)
                                     )
                                 }
+
+                                // Кнопка заполнения тестовых данных
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) { viewModel.populateTestData() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Science,
+                                        contentDescription = "Тестовые данные",
+                                        tint = scheme.textColor.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -454,8 +482,26 @@ private fun CompactLayout(
                 onClick = { viewModel.onTileClick(TilePosition.MIDDLE) },
                 modifier = Modifier.weight(weightMiddle)
             ) {
+                // Индекс выбранного дня (сегодня = последний, т.к. даты отсортированы по возрастанию)
+                var selectedDateIndex by remember { mutableStateOf(availableDates.lastIndex.coerceAtLeast(0)) }
+                
+                // Обновляем индекс когда список дат меняется (например, после загрузки тестовых данных)
+                LaunchedEffect(availableDates.size) {
+                    if (selectedDateIndex >= availableDates.size || selectedDateIndex == 0) {
+                        selectedDateIndex = availableDates.lastIndex.coerceAtLeast(0)
+                    }
+                }
+                
                 InputTileContent(
-                    entries = todayEntries,
+                    entries = selectedDayEntries,
+                    availableDates = availableDates,
+                    selectedDateIndex = selectedDateIndex,
+                    onDaySelected = { index ->
+                        selectedDateIndex = index
+                        if (index < availableDates.size) {
+                            viewModel.selectDay(availableDates[index])
+                        }
+                    },
                     isCollapsed = activeTile != null && activeTile != TilePosition.MIDDLE,
                     onEntryClick = onEntryClick,
                     isActive = topTilesActive
@@ -482,11 +528,13 @@ private fun CompactLayout(
                 isLoading = chatLoading,
                 isCollapsed = !chatExpanded,
                 bottomPadding = safeBottomDp,
+                imeBottomPadding = imeBottomDp,
                 onHintClick = { hint -> chatPrefillText = hint }
             )
         }
         
-        // Слой 3: блок ввода — всегда внизу экрана, не движется с плиткой
+        // Слой 3: блок ввода — всегда внизу экрана
+        // imePadding() поднимает блок над клавиатурой
         ChatInputBlock(
             onSendMessage = viewModel::sendChatMessage,
             isLoading = chatLoading,
@@ -495,7 +543,9 @@ private fun CompactLayout(
             onExpandRequest = { viewModel.onTileClick(TilePosition.BOTTOM) },
             prefillText = chatPrefillText,
             onPrefillConsumed = { chatPrefillText = "" },
-            modifier = Modifier.align(Alignment.BottomCenter)
+            modifier = Modifier
+                .imePadding()
+                .align(Alignment.BottomCenter)
         )
     }
 }
@@ -511,7 +561,8 @@ private fun ExpandedLayout(
     activityCoefficient: Float,
     chatMessages: List<ChatMessage>,
     chatLoading: Boolean,
-    todayEntries: List<DayEntry>,
+    selectedDayEntries: List<DayEntry>,
+    availableDates: List<String>,
     userProfile: UserProfile?,
     onEntryClick: (DayEntry) -> Unit,
     onShowResetDialog: () -> Unit,
@@ -602,6 +653,24 @@ private fun ExpandedLayout(
                                         modifier = Modifier.size(22.dp)
                                     )
                                 }
+
+                                // Кнопка заполнения тестовых данных
+                                Box(
+                                    modifier = Modifier
+                                        .size(36.dp)
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null
+                                        ) { viewModel.populateTestData() },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Science,
+                                        contentDescription = "Тестовые данные",
+                                        tint = scheme.textColor.copy(alpha = 0.5f),
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
                             }
                         }
                     }
@@ -615,8 +684,26 @@ private fun ExpandedLayout(
                 onClick = { viewModel.onTileClick(TilePosition.MIDDLE) },
                 modifier = Modifier.weight(weightMiddle)
             ) {
+                // Индекс выбранного дня (сегодня = последний, т.к. даты отсортированы по возрастанию)
+                var selectedDateIndex by remember { mutableStateOf(availableDates.lastIndex.coerceAtLeast(0)) }
+                
+                // Обновляем индекс когда список дат меняется
+                LaunchedEffect(availableDates.size) {
+                    if (selectedDateIndex >= availableDates.size || selectedDateIndex == 0) {
+                        selectedDateIndex = availableDates.lastIndex.coerceAtLeast(0)
+                    }
+                }
+                
                 InputTileContent(
-                    entries = todayEntries,
+                    entries = selectedDayEntries,
+                    availableDates = availableDates,
+                    selectedDateIndex = selectedDateIndex,
+                    onDaySelected = { index ->
+                        selectedDateIndex = index
+                        if (index < availableDates.size) {
+                            viewModel.selectDay(availableDates[index])
+                        }
+                    },
                     isCollapsed = activeTile != null && activeTile != TilePosition.MIDDLE,
                     onEntryClick = onEntryClick
                 )

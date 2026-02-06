@@ -106,6 +106,7 @@ fun BottomTileContent(
     isLoading: Boolean = false,
     isCollapsed: Boolean = false,
     bottomPadding: Dp = 0.dp,
+    imeBottomPadding: Dp = 0.dp,
     onHintClick: (String) -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -117,11 +118,11 @@ fun BottomTileContent(
     if (!isCollapsed) {
         if (messages.isEmpty()) {
             // Пустой чат — показываем карусель подсказок
-            // Подсказки остаются по центру, не зависят от клавиатуры
+            // Подсказки поднимаются вверх когда клавиатура открыта (imeBottomPadding)
             Box(
                 modifier = modifier
                     .fillMaxSize()
-                    .padding(bottom = DesignTokens.chatInputBlockHeight + 32.dp + bottomPadding),
+                    .padding(bottom = DesignTokens.chatInputBlockHeight + 32.dp + bottomPadding + imeBottomPadding),
                 contentAlignment = Alignment.Center
             ) {
                 ChatHintsCarousel(
@@ -145,7 +146,7 @@ fun BottomTileContent(
                     reverseLayout = true,
                     contentPadding = PaddingValues(
                         top = 4.dp,
-                        bottom = DesignTokens.chatInputBlockHeight + 32.dp + bottomPadding
+                        bottom = DesignTokens.chatInputBlockHeight + 32.dp + bottomPadding + imeBottomPadding
                     )
                 ) {
                     // При reverseLayout первый item отображается внизу

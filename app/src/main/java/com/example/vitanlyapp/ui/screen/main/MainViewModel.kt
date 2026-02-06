@@ -7,6 +7,7 @@ import com.example.vitanlyapp.domain.model.ActivityLevel
 import com.example.vitanlyapp.domain.model.AgentCommand
 import com.example.vitanlyapp.domain.model.ChatMessage
 import com.example.vitanlyapp.domain.model.ChatRole
+import com.example.vitanlyapp.domain.model.FoodEntry
 import com.example.vitanlyapp.domain.model.KBJUData
 import com.example.vitanlyapp.domain.model.KbjuBarStat
 import com.example.vitanlyapp.domain.model.ThemeMode
@@ -28,8 +29,11 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 import javax.inject.Inject
 
 @OptIn(ExperimentalCoroutinesApi::class)
@@ -90,11 +94,35 @@ class MainViewModel @Inject constructor(
 
     val kbjuData: StateFlow<KBJUData> = kbjuRepository.getKbju()
 
-    /** Записи о еде за сегодня для отображения в средней плитке. Обновляется при смене дня. */
-    val todayEntries: StateFlow<List<DayEntry>> = dayEntryRepository
-        .getCurrentDateFlow()
-        .flatMapLatest { date -> dayEntryRepository.getEntriesForDateFlow(date) }
+    // ══════════════════════════════════════════════════════════════════════════
+    // Навигация по дням на средней плитке
+    // ══════════════════════════════════════════════════════════════════════════
+
+    private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
+
+    /** Выбранная дата для отображения на средней плитке. null = сегодня */
+    private val _selectedDate = MutableStateFlow<String?>(null)
+
+    /** Список доступных дат с записями (включая сегодня). Старые даты первыми, сегодня последним. */
+    val availableDates: StateFlow<List<String>> = dayEntryRepository.getAllDatesFlow()
+        .map { dates ->
+            val today = LocalDate.now().format(dateFormatter)
+            (listOf(today) + dates).distinct().sorted() // Старые слева, новые справа
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf(LocalDate.now().format(dateFormatter)))
+
+    /** Записи о еде за выбранный день для отображения в средней плитке. */
+    val selectedDayEntries: StateFlow<List<DayEntry>> = _selectedDate
+        .flatMapLatest { date ->
+            val targetDate = date ?: LocalDate.now().format(dateFormatter)
+            dayEntryRepository.getEntriesForDateFlow(targetDate)
+        }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Выбирает день для отображения на средней плитке. */
+    fun selectDay(date: String) {
+        _selectedDate.value = date
+    }
 
     /** Профиль пользователя для отображения параметров в верхней плитке */
     val userProfile: StateFlow<UserProfile?> = userProfileRepository.getProfileFlow()
@@ -229,6 +257,54 @@ class MainViewModel @Inject constructor(
             userProfileRepository.clearAllData()
             _chatMessages.value = emptyList()
             onComplete()
+        }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════════
+    // Тестовые данные
+    // ══════════════════════════════════════════════════════════════════════════
+
+    /**
+     * Заполняет БД тестовыми данными о еде за последние 5 дней.
+     * Используется для тестирования навигации по дням.
+     */
+    fun populateTestData() {
+        viewModelScope.launch {
+            val testFoods = listOf(
+                // Завтраки
+                FoodEntry("Яичница", 150, 220, 14f, 17f, 1f, "🍳"),
+                FoodEntry("Творог 5%", 200, 210, 34f, 10f, 6f, "🧀"),
+                FoodEntry("Овсянка", 250, 230, 8f, 5f, 40f, "🥣"),
+                FoodEntry("Омлет", 180, 260, 18f, 20f, 2f, "🍳"),
+                // Обеды
+                FoodEntry("Куриная грудка", 200, 330, 62f, 7f, 0f, "🍗"),
+                FoodEntry("Гречка", 150, 200, 8f, 2f, 40f, "🍚"),
+                FoodEntry("Рис", 180, 230, 5f, 1f, 50f, "🍚"),
+                FoodEntry("Говядина тушёная", 180, 290, 38f, 15f, 0f, "🥩"),
+                // Ужины
+                FoodEntry("Рыба запечённая", 180, 200, 36f, 6f, 0f, "🐟"),
+                FoodEntry("Салат овощной", 200, 80, 2f, 5f, 8f, "🥗"),
+                FoodEntry("Сёмга на пару", 150, 250, 30f, 14f, 0f, "🐟"),
+                // Перекусы
+                FoodEntry("Банан", 120, 107, 1f, 0f, 27f, "🍌"),
+                FoodEntry("Яблоко", 180, 94, 0f, 0f, 25f, "🍎"),
+                FoodEntry("Орехи", 30, 180, 5f, 16f, 5f, "🥜"),
+                FoodEntry("Йогурт", 150, 90, 5f, 3f, 12f, "🥛")
+            )
+
+            val today = LocalDate.now()
+            for (daysAgo in 0..4) {
+                val date = today.minusDays(daysAgo.toLong()).format(dateFormatter)
+                // Выбираем 3-5 случайных блюд для каждого дня
+                val dayFoods = testFoods.shuffled().take((3..5).random())
+                dayEntryRepository.addEntriesForDate(date, dayFoods)
+            }
+
+            // Добавляем сообщение в чат
+            _chatMessages.value = _chatMessages.value + ChatMessage(
+                ChatRole.ASSISTANT,
+                "🧪 Добавлены тестовые данные за 5 дней. Попробуйте свайпы на средней плитке!"
+            )
         }
     }
 

@@ -120,4 +120,11 @@ interface DayEntryDao {
      */
     @Query("DELETE FROM day_entries")
     suspend fun deleteAllEntries()
+
+    /**
+     * Получить все уникальные даты с записями, отсортированные по убыванию.
+     * Используется для навигации по дням на плитке продуктов.
+     */
+    @Query("SELECT DISTINCT date FROM day_entries ORDER BY date DESC")
+    fun getAllDatesFlow(): Flow<List<String>>
 }
