@@ -104,19 +104,9 @@ fun UpdateDialog(
             )
         }
 
-        is UpdateUiState.Error -> {
-            ErrorDialog(
-                message = currentState.message,
-                onRetry = { viewModel.checkForUpdates() },
-                onDismiss = {
-                    viewModel.dismissUpdate()
-                    onDismiss()
-                }
-            )
-        }
-
         else -> {
-            // Idle, Checking, UpToDate, Dismissed — не показываем диалог
+            // Idle, Checking, UpToDate, Dismissed, Error — не показываем диалог
+            // Пользователь видит диалог ТОЛЬКО когда есть реальное обновление
         }
     }
 }
