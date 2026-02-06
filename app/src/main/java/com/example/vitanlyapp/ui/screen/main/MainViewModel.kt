@@ -71,7 +71,8 @@ class MainViewModel @Inject constructor(
         viewModelScope.launch {
             val next = when (themeMode.value) {
                 ThemeMode.CLASSIC -> ThemeMode.WARM_DARK
-                ThemeMode.WARM_DARK -> ThemeMode.CLASSIC
+                ThemeMode.WARM_DARK -> ThemeMode.MATTE_DARK
+                ThemeMode.MATTE_DARK -> ThemeMode.CLASSIC
             }
             themeRepository.setThemeMode(next)
         }

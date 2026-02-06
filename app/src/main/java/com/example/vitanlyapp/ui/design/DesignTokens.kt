@@ -172,6 +172,9 @@ object DesignTokens {
 
     // Высота минимальной плитки чата (только строка ввода)
     val chatTileMinHeight: Dp = 92.dp
+    
+    // Доля экрана для раскрытой плитки чата (2/3 экрана)
+    const val chatTileExpandedFraction: Float = 0.66f
 
     // Форма нижней плитки — скругление только сверху, снизу уходит за экран
     val bottomTileCornerRadius: Dp = 24.dp

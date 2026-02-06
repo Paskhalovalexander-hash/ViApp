@@ -6,12 +6,16 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.draggable
+import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -39,8 +43,10 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
@@ -52,6 +58,7 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.foundation.layout.ime
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBars
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.core.view.WindowCompat
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -63,6 +70,7 @@ import com.example.vitanlyapp.domain.model.ThemeMode
 import com.example.vitanlyapp.domain.model.TilePosition
 import com.example.vitanlyapp.domain.repository.DayEntry
 import com.example.vitanlyapp.domain.repository.UserProfile
+import com.example.vitanlyapp.ui.component.NoiseOverlay
 import com.example.vitanlyapp.ui.component.Tile
 import com.example.vitanlyapp.ui.design.AppColorSchemes
 import com.example.vitanlyapp.ui.design.DesignTokens
@@ -70,6 +78,7 @@ import com.example.vitanlyapp.ui.design.LocalAppColorScheme
 import com.example.vitanlyapp.ui.update.UpdateDialog
 import com.example.vitanlyapp.ui.update.UpdateViewModel
 import dev.chrisbanes.haze.rememberHazeState
+import kotlinx.coroutines.launch
 
 // Плавное замедление в конце: cubic-bezier(0.22, 0.61, 0.36, 1)
 private val smoothEasing = CubicBezierEasing(0.22f, 0.61f, 0.36f, 1f)
@@ -101,6 +110,7 @@ fun MainScreen(
     val scheme = when (themeMode) {
         ThemeMode.CLASSIC -> AppColorSchemes.Classic
         ThemeMode.WARM_DARK -> AppColorSchemes.WarmDark
+        ThemeMode.MATTE_DARK -> AppColorSchemes.MatteDark
     }
 
     // Проверка обновлений при запуске
@@ -220,6 +230,13 @@ fun MainScreen(
                     }
                 )
         ) {
+        // Текстура шума для матовой тёмной темы
+        if (themeMode == ThemeMode.MATTE_DARK) {
+            NoiseOverlay(
+                noiseAlpha = 0.025f,  // Очень мелкий шум
+                noiseDensity = 0.12f
+            )
+        }
         BoxWithConstraints(
             modifier = Modifier.fillMaxSize()
         ) {
@@ -316,6 +333,7 @@ private fun CompactLayout(
     viewModel: MainViewModel
 ) {
     val density = LocalDensity.current
+    val scheme = LocalAppColorScheme.current
     
     // HazeState для glassmorphism плашек веса/активности в верхней плитке
     val kbjuHazeState = rememberHazeState()
@@ -326,9 +344,6 @@ private fun CompactLayout(
     // Когда клавиатура видна и чат раскрыт — плитка чата перекрывает остальные
     val chatFullScreen = isKeyboardVisible && activeTile == TilePosition.BOTTOM
     
-    // Чат раскрыт (не свёрнут)
-    val chatExpanded = activeTile == TilePosition.BOTTOM || chatFullScreen
-    
     // Высота нижней плитки: фиксированная в idle, fullscreen при раскрытии
     // Включает safe area снизу чтобы уходить за край экрана
     val safeBottomDp = with(density) { safeBottomPx.toDp() }
@@ -338,22 +353,59 @@ private fun CompactLayout(
     // Минимальная высота плитки чата (включая safe area снизу)
     val chatMinHeight = DesignTokens.chatTileMinHeight + safeBottomDp
 
+    val coroutineScope = rememberCoroutineScope()
+    val keyboardController = LocalSoftwareKeyboardController.current
+    
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val screenHeight = maxHeight
+        val screenHeightPx = with(density) { screenHeight.toPx() }
+        val chatMinHeightPx = with(density) { chatMinHeight.toPx() }
         
-        // Анимация высоты плитки чата
-        val chatTileHeight by animateDpAsState(
-            targetValue = if (chatExpanded) screenHeight else chatMinHeight,
-            animationSpec = tileAnimationSpec(),
-            label = "chatTileHeight"
-        )
+        // Высота раскрытой плитки чата: 3/4 экрана
+        val chatExpandedHeightPx = screenHeightPx * 0.75f
         
-        // Анимация скругления углов (от 24dp до 0dp)
-        val cornerRadius by animateDpAsState(
-            targetValue = if (chatExpanded) 0.dp else DesignTokens.bottomTileCornerRadius,
-            animationSpec = tileAnimationSpec(),
-            label = "cornerRadius"
-        )
+        // Диапазон перетаскивания
+        val maxDragOffset = (chatExpandedHeightPx - chatMinHeightPx).coerceAtLeast(1f)
+        
+        // Анимируемый offset для свайпа (0 = свёрнуто, maxDragOffset = раскрыто)
+        val dragOffset = remember { Animatable(0f) }
+        
+        // Флаг: плитка полностью раскрыта (для управления клавиатурой)
+        val isFullyExpanded = dragOffset.value >= maxDragOffset * 0.95f
+        
+        // Состояние для отслеживания перетаскивания
+        val draggableState = rememberDraggableState { delta ->
+            // Положительный delta = свайп вниз = сворачивание → скрыть клавиатуру
+            if (delta > 0) {
+                keyboardController?.hide()
+            }
+            coroutineScope.launch {
+                val newOffset = (dragOffset.value - delta).coerceIn(0f, maxDragOffset)
+                dragOffset.snapTo(newOffset)
+            }
+        }
+        
+        // Синхронизация: когда ViewModel меняет activeTile → анимируем offset
+        LaunchedEffect(activeTile) {
+            val targetOffset = if (activeTile == TilePosition.BOTTOM) maxDragOffset else 0f
+            dragOffset.animateTo(targetOffset, tileAnimationSpec())
+        }
+        
+        // Текущая высота плитки чата на основе offset
+        val chatTileHeight = with(density) {
+            (chatMinHeightPx + dragOffset.value).toDp()
+        }
+        
+        // Чат раскрыт — определяем по offset (больше 30% = раскрыт)
+        val chatExpanded = dragOffset.value > maxDragOffset * 0.3f || chatFullScreen
+        
+        // Прогресс раскрытия (0..1) для анимации скругления углов
+        val expansionProgress = if (maxDragOffset > 0f) {
+            (dragOffset.value / maxDragOffset).coerceIn(0f, 1f)
+        } else 0f
+        
+        // Анимация скругления углов (от 24dp до 0dp) на основе progress
+        val cornerRadius = DesignTokens.bottomTileCornerRadius * (1f - expansionProgress)
         
         val animatedShape = RoundedCornerShape(
             topStart = cornerRadius,
@@ -364,7 +416,7 @@ private fun CompactLayout(
         
         // Оптимизация: верхние плитки активны только когда чат почти свёрнут
         // Порог — когда высота плитки чата меньше минимальной + 20% от разницы
-        val expansionThreshold = chatMinHeight + (screenHeight - chatMinHeight) * 0.15f
+        val expansionThreshold = chatMinHeight + (screenHeight * DesignTokens.chatTileExpandedFraction - chatMinHeight) * 0.15f
         val topTilesActive = chatTileHeight < expansionThreshold
         
         // Слой 1: верхние плитки (TOP и MIDDLE) — всегда отображаются на заднем плане
@@ -383,6 +435,7 @@ private fun CompactLayout(
                 isCollapsed = activeTile != null && activeTile != TilePosition.TOP,
                 onClick = { viewModel.onTileClick(TilePosition.TOP) },
                 modifier = Modifier.weight(weightTop),
+                backgroundBrush = scheme.tileTopMiddleBackgroundBrush,
                 overflowContent = {
                     KbjuTileWheelOverflowContent(
                         isExpanded = activeTile == TilePosition.TOP,
@@ -480,7 +533,8 @@ private fun CompactLayout(
                 isExpanded = activeTile == TilePosition.MIDDLE,
                 isCollapsed = activeTile != null && activeTile != TilePosition.MIDDLE,
                 onClick = { viewModel.onTileClick(TilePosition.MIDDLE) },
-                modifier = Modifier.weight(weightMiddle)
+                modifier = Modifier.weight(weightMiddle),
+                backgroundBrush = scheme.tileTopMiddleBackgroundBrush
             ) {
                 // Индекс выбранного дня (сегодня = последний, т.к. даты отсортированы по возрастанию)
                 var selectedDateIndex by remember { mutableStateOf(availableDates.lastIndex.coerceAtLeast(0)) }
@@ -510,7 +564,7 @@ private fun CompactLayout(
         }
 
         // Слой 2: плитка чата — edge-to-edge, уходит за нижний край экрана
-        // Анимированная высота и скругление при разворачивании/сворачивании
+        // Поддержка свайпов: вытягивание вверх/вниз или свайп для раскрытия/сворачивания
         Tile(
             position = TilePosition.BOTTOM,
             isExpanded = chatExpanded,
@@ -522,6 +576,24 @@ private fun CompactLayout(
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
                 .height(chatTileHeight)
+                .draggable(
+                    state = draggableState,
+                    orientation = Orientation.Vertical,
+                    onDragStopped = {
+                        // При отпускании — привязка к ближайшему состоянию
+                        coroutineScope.launch {
+                            val threshold = maxDragOffset * 0.5f
+                            val targetOffset = if (dragOffset.value > threshold) maxDragOffset else 0f
+                            dragOffset.animateTo(targetOffset, tileAnimationSpec())
+                            // Обновляем состояние ViewModel
+                            if (targetOffset == maxDragOffset && activeTile != TilePosition.BOTTOM) {
+                                viewModel.onTileClick(TilePosition.BOTTOM)
+                            } else if (targetOffset == 0f && activeTile == TilePosition.BOTTOM) {
+                                viewModel.onTileClick(TilePosition.BOTTOM) // Сворачиваем
+                            }
+                        }
+                    }
+                )
         ) {
             BottomTileContent(
                 messages = chatMessages,
@@ -539,6 +611,7 @@ private fun CompactLayout(
             onSendMessage = viewModel::sendChatMessage,
             isLoading = chatLoading,
             isCollapsed = !chatExpanded,
+            isFullyExpanded = isFullyExpanded,
             bottomPadding = safeBottomDp,
             onExpandRequest = { viewModel.onTileClick(TilePosition.BOTTOM) },
             prefillText = chatPrefillText,
@@ -569,6 +642,8 @@ private fun ExpandedLayout(
     onToggleTheme: () -> Unit,
     viewModel: MainViewModel
 ) {
+    val scheme = LocalAppColorScheme.current
+    
     // HazeState для glassmorphism плашек веса/активности в верхней плитке
     val kbjuHazeState = rememberHazeState()
     
@@ -586,6 +661,7 @@ private fun ExpandedLayout(
                 isCollapsed = activeTile != null && activeTile != TilePosition.TOP,
                 onClick = { viewModel.onTileClick(TilePosition.TOP) },
                 modifier = Modifier.weight(weightTop),
+                backgroundBrush = scheme.tileTopMiddleBackgroundBrush,
                 overflowContent = {
                     KbjuTileWheelOverflowContent(
                         isExpanded = activeTile == TilePosition.TOP,
@@ -597,7 +673,6 @@ private fun ExpandedLayout(
                     )
                 }
             ) {
-                val scheme = LocalAppColorScheme.current
                 Box(modifier = Modifier.fillMaxSize()) {
                     KbjuTileContent(
                         kcalStat = kcalStat,
@@ -682,7 +757,8 @@ private fun ExpandedLayout(
                 isExpanded = activeTile == TilePosition.MIDDLE,
                 isCollapsed = activeTile != null && activeTile != TilePosition.MIDDLE,
                 onClick = { viewModel.onTileClick(TilePosition.MIDDLE) },
-                modifier = Modifier.weight(weightMiddle)
+                modifier = Modifier.weight(weightMiddle),
+                backgroundBrush = scheme.tileTopMiddleBackgroundBrush
             ) {
                 // Индекс выбранного дня (сегодня = последний, т.к. даты отсортированы по возрастанию)
                 var selectedDateIndex by remember { mutableStateOf(availableDates.lastIndex.coerceAtLeast(0)) }
@@ -731,6 +807,7 @@ private fun ExpandedLayout(
                 onSendMessage = viewModel::sendChatMessage,
                 isLoading = chatLoading,
                 isCollapsed = false,
+                isFullyExpanded = true, // В ExpandedLayout чат всегда раскрыт
                 prefillText = chatPrefillText,
                 onPrefillConsumed = { chatPrefillText = "" },
                 modifier = Modifier.align(Alignment.BottomCenter)
