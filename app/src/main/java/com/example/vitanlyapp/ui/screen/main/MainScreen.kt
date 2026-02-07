@@ -15,6 +15,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -25,7 +26,9 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.layout.safeDrawing
@@ -78,6 +81,7 @@ import com.example.vitanlyapp.ui.design.LocalAppColorScheme
 import com.example.vitanlyapp.ui.update.UpdateDialog
 import com.example.vitanlyapp.ui.update.UpdateViewModel
 import dev.chrisbanes.haze.rememberHazeState
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.launch
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
@@ -124,9 +128,17 @@ fun MainScreen(
     // Диалог обновления
     UpdateDialog(viewModel = updateViewModel)
     
-    // Жест "назад" сворачивает плитку вместо закрытия приложения
+    // Жест "назад": если клавиатура открыта — только закрыть её; иначе — свернуть плитку
+    val density = LocalDensity.current
+    val imeBottom = WindowInsets.ime.getBottom(density)
+    val isKeyboardVisible = imeBottom > 0
+    val keyboardController = LocalSoftwareKeyboardController.current
     BackHandler(enabled = activeTile != null) {
-        viewModel.onTileClick(activeTile!!) // Повторный клик сворачивает плитку
+        if (activeTile == TilePosition.BOTTOM && isKeyboardVisible) {
+            keyboardController?.hide()
+        } else {
+            viewModel.onTileClick(activeTile!!)
+        }
     }
 
     // Делаем иконки строки состояния читаемыми: тёмные на светлом фоне (Classic), светлые на тёмном (WarmDark)
@@ -384,11 +396,6 @@ private fun CompactLayout(
         
         // Состояние для отслеживания перетаскивания
         val draggableState = rememberDraggableState { delta ->
-            // Положительный delta = свайп вниз = сворачивание → скрыть клавиатуру один раз за жест
-            if (delta > 0 && !imeHiddenThisGesture) {
-                keyboardController?.hide()
-                imeHiddenThisGesture = true
-            }
             coroutineScope.launch {
                 val newOffset = (dragOffset.value - delta).coerceIn(0f, maxDragOffset)
                 dragOffset.snapTo(newOffset)
@@ -408,6 +415,8 @@ private fun CompactLayout(
         
         // Чат раскрыт — определяем по offset (больше 30% = раскрыт)
         val chatExpanded = dragOffset.value > maxDragOffset * 0.3f || chatFullScreen
+        // Контент (LazyColumn) скрываем раньше — чтобы не тупило при сворачивании
+        val showChatContent = dragOffset.value > maxDragOffset * 0.7f
         
         // Прогресс раскрытия (0..1) для анимации скругления углов
         val expansionProgress = if (maxDragOffset > 0f) {
@@ -570,72 +579,76 @@ private fun CompactLayout(
             }
         }
 
-        // Слой 2: прозрачная область захвата — gap между плитками + верх чата
-        // Позволяет легко начать перетаскивание из пустого пространства над плиткой чата
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .fillMaxWidth()
-                .height(chatTileHeight + DesignTokens.tileSpacing)
-                .draggable(
-                    state = draggableState,
-                    orientation = Orientation.Vertical,
-                    onDragStarted = { imeHiddenThisGesture = false },
-                    onDragStopped = {
-                        imeHiddenThisGesture = false
-                        coroutineScope.launch {
-                            val threshold = maxDragOffset * 0.5f
-                            val targetOffset = if (dragOffset.value > threshold) maxDragOffset else 0f
-                            dragOffset.animateTo(targetOffset, tileAnimationSpec())
-                            if (targetOffset == maxDragOffset && activeTile != TilePosition.BOTTOM) {
-                                viewModel.onTileClick(TilePosition.BOTTOM)
-                            } else if (targetOffset == 0f && activeTile == TilePosition.BOTTOM) {
-                                viewModel.onTileClick(TilePosition.BOTTOM)
-                            }
-                        }
-                    }
-                )
-        )
-        
-        // Слой 2b: плитка чата — edge-to-edge, уходит за нижний край экрана
-        Tile(
-            position = TilePosition.BOTTOM,
-            isExpanded = chatExpanded,
-            isCollapsed = false, // Нижняя плитка никогда не "схлопывается" визуально
-            onClick = { viewModel.onTileClick(TilePosition.BOTTOM) },
-            shape = animatedShape,
-            edgeToEdge = true,
+        // Слой 2: ручка 48dp + плитка. Драг за ручку — палец управляет высотой (snapTo)
+        val onDragStarted: suspend (CoroutineScope, Offset) -> Unit = { _, _ ->
+            keyboardController?.hide()
+            imeHiddenThisGesture = true
+        }
+        val onDragStopped: suspend (CoroutineScope, Float) -> Unit = { scope, _ ->
+            imeHiddenThisGesture = false
+            scope.launch {
+                val threshold = maxDragOffset * 0.8f
+                val targetOffset = if (dragOffset.value > threshold) maxDragOffset else 0f
+                dragOffset.animateTo(targetOffset, tileAnimationSpec())
+                if (targetOffset == maxDragOffset && activeTile != TilePosition.BOTTOM) {
+                    viewModel.onTileClick(TilePosition.BOTTOM)
+                } else if (targetOffset == 0f && activeTile == TilePosition.BOTTOM) {
+                    viewModel.onTileClick(TilePosition.BOTTOM)
+                }
+            }
+        }
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
-                .height(chatTileHeight)
-                .draggable(
-                    state = draggableState,
-                    orientation = Orientation.Vertical,
-                    onDragStarted = { imeHiddenThisGesture = false },
-                    onDragStopped = {
-                        imeHiddenThisGesture = false
-                        coroutineScope.launch {
-                            val threshold = maxDragOffset * 0.5f
-                            val targetOffset = if (dragOffset.value > threshold) maxDragOffset else 0f
-                            dragOffset.animateTo(targetOffset, tileAnimationSpec())
-                            if (targetOffset == maxDragOffset && activeTile != TilePosition.BOTTOM) {
-                                viewModel.onTileClick(TilePosition.BOTTOM)
-                            } else if (targetOffset == 0f && activeTile == TilePosition.BOTTOM) {
-                                viewModel.onTileClick(TilePosition.BOTTOM)
-                            }
-                        }
-                    }
-                )
         ) {
+            // Ручка 48dp — берёшь за неё, плитка следует за пальцем (snapTo = палец управляет)
+            Box(
+                modifier = Modifier
+                    .offset(y = 12.dp)
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .draggable(
+                        state = draggableState,
+                        orientation = Orientation.Vertical,
+                        onDragStarted = onDragStarted,
+                        onDragStopped = onDragStopped
+                    ),
+                contentAlignment = Alignment.Center
+            ) {
+                // Полоска-захват
+                Box(
+                    modifier = Modifier
+                        .width(40.dp)
+                        .height(4.dp)
+                        .background(
+                            scheme.textColor.copy(alpha = 0.35f),
+                            RoundedCornerShape(2.dp)
+                        )
+                )
+            }
+            // Плитка чата — без draggable, чат скроллится отдельно
+            Tile(
+                position = TilePosition.BOTTOM,
+                isExpanded = chatExpanded,
+                isCollapsed = false,
+                onClick = { viewModel.onTileClick(TilePosition.BOTTOM) },
+                shape = animatedShape,
+                edgeToEdge = true,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(chatTileHeight)
+            ) {
             BottomTileContent(
                 messages = chatMessages,
                 isLoading = chatLoading,
                 isCollapsed = !chatExpanded,
+                showContent = showChatContent,
                 bottomPadding = safeBottomDp,
                 imeBottomPadding = imeBottomDp,
                 onHintClick = { hint -> chatPrefillText = hint }
             )
+        }
         }
         
         // Слой 3: блок ввода — всегда внизу экрана

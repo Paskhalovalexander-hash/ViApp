@@ -65,7 +65,7 @@ class MainViewModel @Inject constructor(
     }
 
     val themeMode: StateFlow<ThemeMode> = themeRepository.themeMode
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ThemeMode.CLASSIC)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), ThemeMode.MATTE_DARK)
 
     fun toggleTheme() {
         viewModelScope.launch {

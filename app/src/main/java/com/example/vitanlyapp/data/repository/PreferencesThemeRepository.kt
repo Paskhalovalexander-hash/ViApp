@@ -28,8 +28,8 @@ class PreferencesThemeRepository @Inject constructor(
     }
 
     private fun loadThemeMode(): ThemeMode {
-        return prefs.getString(KEY_THEME_MODE, ThemeMode.CLASSIC.name)
+        return prefs.getString(KEY_THEME_MODE, ThemeMode.MATTE_DARK.name)
             ?.let { runCatching { ThemeMode.valueOf(it) }.getOrNull() }
-            ?: ThemeMode.CLASSIC
+            ?: ThemeMode.MATTE_DARK
     }
 }

@@ -4,7 +4,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 
-val LocalAppColorScheme = compositionLocalOf { AppColorSchemes.Classic }
+val LocalAppColorScheme = compositionLocalOf { AppColorSchemes.MatteDark }
 
 /**
  * Цветовая схема приложения.
@@ -26,6 +26,7 @@ data class AppColorScheme(
     val barFatBrush: Brush,
     val barCarbsBrush: Brush,
     val barFill: Color,
+    val barFatFill: Color,  // Основной цвет бара жиров (для курсора и т.п.)
     val barBackground: Color,
     val barOverflow: Color,
     val waveColor: Color,
@@ -67,6 +68,7 @@ object AppColorSchemes {
             listOf(Color(0xFFD6C4F2), Color(0xFFC1A8EB))
         ),
         barFill = Color(0xFF9CC7F0),
+        barFatFill = Color(0xFFF2D29B),
         barBackground = Color(0xFFE6E0D6),
         barOverflow = Color(0x99D64545),
         waveColor = Color(0x99A0DCDC),
@@ -114,6 +116,7 @@ object AppColorSchemes {
             listOf(Color(0xFF6B7B8A), Color(0xFF5A6A78))
         ),
         barFill = Color(0xFF4A6B8A),
+        barFatFill = Color(0xFF5A6B7A),
         barBackground = Color(0xFF1A1F28),
         barOverflow = Color(0x80605050),
         waveColor = Color(0x994A6B8A),
@@ -167,6 +170,7 @@ object AppColorSchemes {
             listOf(Color(0xFF6BA08B), Color(0xFF2E5C4A))  // Углеводы: зелёный/изумрудный (подсказка 3)
         ),
         barFill = Color(0xFFA06B8B),
+        barFatFill = Color(0xFFB07860),
         barBackground = Color(0xFF2A2A2A),  // Фон баров
         barOverflow = Color(0x80804040),  // Переполнение (приглушённый красный)
         waveColor = Color(0x995A5A5A),  // Волна калорий (серая)

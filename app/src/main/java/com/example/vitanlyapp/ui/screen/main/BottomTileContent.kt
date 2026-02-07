@@ -33,6 +33,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.TextStyle
@@ -96,6 +97,7 @@ fun ChatBubble(
  * @param messages Список сообщений чата
  * @param isLoading Идёт ли загрузка ответа от LLM
  * @param isCollapsed Свёрнута ли плитка
+ * @param showContent Показывать контент (LazyColumn/карусель). false при сворачивании — плитка не тупит
  * @param bottomPadding Отступ снизу (для safe area)
  * @param onHintClick Callback при клике на подсказку (для автозаполнения поля ввода)
  * @param modifier Модификатор
@@ -105,6 +107,7 @@ fun BottomTileContent(
     messages: List<ChatMessage>,
     isLoading: Boolean = false,
     isCollapsed: Boolean = false,
+    showContent: Boolean = true,
     bottomPadding: Dp = 0.dp,
     imeBottomPadding: Dp = 0.dp,
     onHintClick: (String) -> Unit = {},
@@ -114,15 +117,15 @@ fun BottomTileContent(
 
     val listState = rememberLazyListState()
 
-    // Контент чата — только когда раскрыто
-    if (!isCollapsed) {
+    // Контент чата — только когда раскрыто И showContent (скрываем раньше при сворачивании)
+    if (!isCollapsed && showContent) {
         if (messages.isEmpty()) {
             // Пустой чат — показываем карусель подсказок
             // Подсказки поднимаются вверх когда клавиатура открыта (imeBottomPadding)
             Box(
                 modifier = modifier
                     .fillMaxSize()
-                    .padding(bottom = DesignTokens.chatInputBlockHeight + 32.dp + bottomPadding + imeBottomPadding),
+                    .padding(bottom = DesignTokens.chatInputBlockHeight + 24.dp + bottomPadding + imeBottomPadding),
                 contentAlignment = Alignment.Center
             ) {
                 ChatHintsCarousel(
@@ -130,9 +133,14 @@ fun BottomTileContent(
                 )
             }
         } else {
-            // Есть сообщения — показываем список
-            // Используем reverseLayout = true — стандартный паттерн для чатов:
-            // последние сообщения автоматически видны внизу
+            // Есть сообщения — отступ снизу = высота input + зазор, чтобы последнее сообщение было над input
+            val GAP = 24.dp
+            val bottomOffset = DesignTokens.chatInputBlockHeight + GAP + bottomPadding + imeBottomPadding
+
+            LaunchedEffect(messages.size, isLoading, imeBottomPadding) {
+                listState.scrollToItem(0)
+            }
+
             Column(
                 modifier = modifier
                     .fillMaxSize()
@@ -146,7 +154,7 @@ fun BottomTileContent(
                     reverseLayout = true,
                     contentPadding = PaddingValues(
                         top = 4.dp,
-                        bottom = DesignTokens.chatInputBlockHeight + 32.dp + bottomPadding + imeBottomPadding
+                        bottom = bottomOffset
                     )
                 ) {
                     // При reverseLayout первый item отображается внизу
@@ -274,6 +282,7 @@ fun ChatInputBlock(
                     fontWeight = FontWeight.Thin,
                     fontSize = DesignTokens.fontSizeInput
                 ),
+                cursorBrush = SolidColor(scheme.barFatFill),
                 singleLine = true,
                 decorationBox = { inner ->
                     Box(
