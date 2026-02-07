@@ -392,6 +392,8 @@ private fun CompactLayout(
         
         // Скрыли IME в текущем жесте — не даём ChatInputBlock повторно показать клавиатуру
         var imeHiddenThisGesture by remember { mutableStateOf(false) }
+        // Состояние плитки до начала драга — для гистерезиса snap (40% / 80%)
+        var wasExpandedAtDragStart by remember { mutableStateOf(false) }
         
         // Состояние для отслеживания перетаскивания
         val draggableState = rememberDraggableState { delta ->
@@ -580,14 +582,21 @@ private fun CompactLayout(
 
         // Слой 2: ручка 48dp + плитка. Драг за ручку — палец управляет высотой (snapTo)
         val onDragStarted: suspend (CoroutineScope, Offset) -> Unit = { _, _ ->
+            wasExpandedAtDragStart = dragOffset.value > maxDragOffset * 0.5f
             keyboardController?.hide()
             imeHiddenThisGesture = true
         }
         val onDragStopped: suspend (CoroutineScope, Float) -> Unit = { scope, _ ->
             imeHiddenThisGesture = false
             scope.launch {
-                val threshold = maxDragOffset * 0.8f
-                val targetOffset = if (dragOffset.value > threshold) maxDragOffset else 0f
+                val expandThreshold = maxDragOffset * 0.4f   // 40% — дотянул до 40% → развернуть
+                val collapseThreshold = maxDragOffset * 0.8f  // 80% — опустил ниже 80% → свернуть
+                val current = dragOffset.value
+                val targetOffset = when {
+                    current >= collapseThreshold -> maxDragOffset
+                    current < expandThreshold -> 0f
+                    else -> if (wasExpandedAtDragStart) 0f else maxDragOffset
+                }
                 dragOffset.animateTo(targetOffset, tileAnimationSpec())
                 if (targetOffset == maxDragOffset && activeTile != TilePosition.BOTTOM) {
                     viewModel.onTileClick(TilePosition.BOTTOM)

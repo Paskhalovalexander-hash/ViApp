@@ -170,7 +170,7 @@ fun BottomTileContent(
                     // Сообщения в обратном порядке (последнее сообщение = первый item = внизу)
                     items(
                         items = messages.asReversed(),
-                        key = { msg -> "${msg.role}-${msg.text.hashCode()}" }
+                        key = { msg -> msg.id }
                     ) { message ->
                         ChatBubble(message = message)
                     }

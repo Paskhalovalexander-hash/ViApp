@@ -28,6 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.UUID
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -202,7 +203,7 @@ class MainViewModel @Inject constructor(
 
         viewModelScope.launch {
             // Добавляем сообщение пользователя
-            _chatMessages.value = _chatMessages.value + ChatMessage(ChatRole.USER, trimmed)
+            _chatMessages.value = _chatMessages.value + ChatMessage(UUID.randomUUID().toString(), ChatRole.USER, trimmed)
             _chatLoading.value = true
 
             // Обрабатываем через оркестратор
@@ -211,6 +212,7 @@ class MainViewModel @Inject constructor(
                     // Формируем ответ для отображения
                     val responseText = buildResponseText(result)
                     _chatMessages.value = _chatMessages.value + ChatMessage(
+                        UUID.randomUUID().toString(),
                         ChatRole.ASSISTANT,
                         responseText
                     )
@@ -329,6 +331,7 @@ class MainViewModel @Inject constructor(
 
             // Добавляем сообщение в чат
             _chatMessages.value = _chatMessages.value + ChatMessage(
+                UUID.randomUUID().toString(),
                 ChatRole.ASSISTANT,
                 "🧪 Добавлены тестовые данные за 5 дней. Попробуйте свайпы на средней плитке!"
             )
@@ -390,7 +393,7 @@ class MainViewModel @Inject constructor(
             }
         }
         message?.let {
-            _chatMessages.value = _chatMessages.value + ChatMessage(ChatRole.ASSISTANT, it)
+            _chatMessages.value = _chatMessages.value + ChatMessage(UUID.randomUUID().toString(), ChatRole.ASSISTANT, it)
         }
     }
 
