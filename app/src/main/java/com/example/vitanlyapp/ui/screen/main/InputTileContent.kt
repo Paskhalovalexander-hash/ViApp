@@ -106,19 +106,26 @@ fun InputTileContent(
         pageCount = { availableDates.size.coerceAtLeast(1) }
     )
 
+    var isProgrammaticScroll by remember { mutableStateOf(false) }
+
     // Синхронизация с внешним selectedDateIndex; зависит от availableDates.size чтобы скроллить к today после загрузки
     LaunchedEffect(selectedDateIndex, availableDates.size) {
         if (pagerState.currentPage != selectedDateIndex && selectedDateIndex < availableDates.size) {
-            pagerState.animateScrollToPage(selectedDateIndex)
+            isProgrammaticScroll = true
+            try {
+                pagerState.animateScrollToPage(selectedDateIndex)
+            } finally {
+                isProgrammaticScroll = false
+            }
         }
     }
 
-    // Отслеживаем свайпы: settledPage — после завершения анимации, ключи — актуальные данные
+    // Отслеживаем свайпы: settledPage — после завершения анимации; только user-driven, не programmatic
     LaunchedEffect(pagerState, availableDates.size, selectedDateIndex) {
         snapshotFlow { pagerState.settledPage }
             .distinctUntilChanged()
             .collect { page ->
-                if (page in availableDates.indices && page != selectedDateIndex) {
+                if (!isProgrammaticScroll && page in availableDates.indices && page != selectedDateIndex) {
                     onDaySelected(page)
                 }
             }

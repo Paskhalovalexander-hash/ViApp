@@ -143,7 +143,8 @@ class MainViewModel @Inject constructor(
                 if (dates.isNotEmpty() && !hasInitializedDate) {
                     hasInitializedDate = true
                     if (!_hasUserSelectedDate.value) {
-                        _selectedDate.value = LocalDate.now().format(dateFormatter)
+                        val todayString = LocalDate.now().format(dateFormatter)
+                        _selectedDate.value = todayString
                     }
                 }
             }
