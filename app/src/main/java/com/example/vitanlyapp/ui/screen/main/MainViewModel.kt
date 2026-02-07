@@ -93,16 +93,15 @@ class MainViewModel @Inject constructor(
     private val _chatLoading = MutableStateFlow(false)
     val chatLoading: StateFlow<Boolean> = _chatLoading.asStateFlow()
 
-    val kbjuData: StateFlow<KBJUData> = kbjuRepository.getKbju()
-
     // ══════════════════════════════════════════════════════════════════════════
-    // Навигация по дням на средней плитке
+    // Выбранный день — единый источник правды для списка продуктов и статистики
     // ══════════════════════════════════════════════════════════════════════════
 
     private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
 
-    /** Выбранная дата для отображения на средней плитке. null = сегодня */
+    /** Выбранная дата. null = сегодня. От selectedDate зависят selectedDayEntries и kbjuData. */
     private val _selectedDate = MutableStateFlow<String?>(null)
+    val selectedDate: StateFlow<String?> = _selectedDate.asStateFlow()
 
     /** Список доступных дат с записями (включая сегодня). Старые даты первыми, сегодня последним. */
     val availableDates: StateFlow<List<String>> = dayEntryRepository.getAllDatesFlow()
@@ -119,6 +118,14 @@ class MainViewModel @Inject constructor(
             dayEntryRepository.getEntriesForDateFlow(targetDate)
         }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    /** Статистика КБЖУ за выбранный день. Зависит от selectedDate. */
+    val kbjuData: StateFlow<KBJUData> = _selectedDate
+        .flatMapLatest { date ->
+            val targetDate = date ?: LocalDate.now().format(dateFormatter)
+            kbjuRepository.getKbjuForDateFlow(targetDate)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), KBJUData.default())
 
     /** Выбирает день для отображения на средней плитке. */
     fun selectDay(date: String) {

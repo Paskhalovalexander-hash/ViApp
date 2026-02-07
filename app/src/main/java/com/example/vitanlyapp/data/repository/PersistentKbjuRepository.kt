@@ -15,6 +15,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.launch
@@ -74,6 +75,28 @@ class PersistentKbjuRepository @Inject constructor(
     }
 
     override fun getKbju(): StateFlow<KBJUData> = _data.asStateFlow()
+
+    override fun getKbjuForDateFlow(date: String): Flow<KBJUData> =
+        combine(
+            dayEntryRepository.getEntriesForDateFlow(date),
+            userProfileRepository.getProfileFlow()
+        ) { entries, profile ->
+            val currentKcal = entries.sumOf { it.kcal }
+            val currentProtein = entries.sumOf { it.protein.toDouble() }.toFloat()
+            val currentFat = entries.sumOf { it.fat.toDouble() }.toFloat()
+            val currentCarbs = entries.sumOf { it.carbs.toDouble() }.toFloat()
+            val norms = profile?.let { calculateNorms(it) } ?: DailyNorms.default()
+            KBJUData(
+                currentCalories = currentKcal,
+                currentProtein = currentProtein.roundToInt(),
+                currentFat = currentFat.roundToInt(),
+                currentCarbs = currentCarbs.roundToInt(),
+                maxCalories = norms.kcal,
+                maxProtein = norms.protein,
+                maxFat = norms.fat,
+                maxCarbs = norms.carbs
+            )
+        }
 
     override suspend fun updateKbju(data: KBJUData) {
         // В persistent-версии обновление происходит автоматически
