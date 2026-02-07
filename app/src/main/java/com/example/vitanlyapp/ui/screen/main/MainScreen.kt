@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -597,37 +596,12 @@ private fun CompactLayout(
                 }
             }
         }
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .align(Alignment.BottomCenter)
+                .height(chatTileHeight)
         ) {
-            // Ручка 48dp — берёшь за неё, плитка следует за пальцем (snapTo = палец управляет)
-            Box(
-                modifier = Modifier
-                    .offset(y = 12.dp)
-                    .fillMaxWidth()
-                    .height(48.dp)
-                    .draggable(
-                        state = draggableState,
-                        orientation = Orientation.Vertical,
-                        onDragStarted = onDragStarted,
-                        onDragStopped = onDragStopped
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                // Полоска-захват
-                Box(
-                    modifier = Modifier
-                        .width(40.dp)
-                        .height(4.dp)
-                        .background(
-                            scheme.textColor.copy(alpha = 0.35f),
-                            RoundedCornerShape(2.dp)
-                        )
-                )
-            }
-            // Плитка чата — без draggable, чат скроллится отдельно
             Tile(
                 position = TilePosition.BOTTOM,
                 isExpanded = chatExpanded,
@@ -635,20 +609,32 @@ private fun CompactLayout(
                 onClick = { viewModel.onTileClick(TilePosition.BOTTOM) },
                 shape = animatedShape,
                 edgeToEdge = true,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(chatTileHeight)
+                modifier = Modifier.fillMaxSize()
             ) {
-            BottomTileContent(
-                messages = chatMessages,
-                isLoading = chatLoading,
-                isCollapsed = !chatExpanded,
-                showContent = showChatContent,
-                bottomPadding = safeBottomDp,
-                imeBottomPadding = imeBottomDp,
-                onHintClick = { hint -> chatPrefillText = hint }
+                BottomTileContent(
+                    messages = chatMessages,
+                    isLoading = chatLoading,
+                    isCollapsed = !chatExpanded,
+                    showContent = showChatContent,
+                    bottomPadding = safeBottomDp,
+                    imeBottomPadding = imeBottomDp,
+                    onHintClick = { hint -> chatPrefillText = hint }
+                )
+            }
+            // Зона захвата: -30dp от верха плитки, высота 60dp
+            Box(
+                modifier = Modifier
+                    .align(Alignment.TopCenter)
+                    .offset(y = (-30).dp)
+                    .fillMaxWidth()
+                    .height(60.dp)
+                    .draggable(
+                        state = draggableState,
+                        orientation = Orientation.Vertical,
+                        onDragStarted = onDragStarted,
+                        onDragStopped = onDragStopped
+                    )
             )
-        }
         }
         
         // Слой 3: блок ввода — всегда внизу экрана
