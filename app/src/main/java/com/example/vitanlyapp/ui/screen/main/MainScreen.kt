@@ -79,6 +79,8 @@ import com.example.vitanlyapp.ui.update.UpdateDialog
 import com.example.vitanlyapp.ui.update.UpdateViewModel
 import dev.chrisbanes.haze.rememberHazeState
 import kotlinx.coroutines.launch
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 // Плавное замедление в конце: cubic-bezier(0.22, 0.61, 0.36, 1)
 private val smoothEasing = CubicBezierEasing(0.22f, 0.61f, 0.36f, 1f)
@@ -103,7 +105,8 @@ fun MainScreen(
     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     
-    // Навигация по дням на средней плитке
+    // Навигация по дням на средней плитке (selectedDate — источник правды)
+    val selectedDate by viewModel.selectedDate.collectAsStateWithLifecycle()
     val selectedDayEntries by viewModel.selectedDayEntries.collectAsStateWithLifecycle()
     val availableDates by viewModel.availableDates.collectAsStateWithLifecycle()
 
@@ -264,6 +267,7 @@ fun MainScreen(
                     activityCoefficient = activityCoefficient,
                     chatMessages = chatMessages,
                     chatLoading = chatLoading,
+                    selectedDate = selectedDate,
                     selectedDayEntries = selectedDayEntries,
                     availableDates = availableDates,
                     userProfile = userProfile,
@@ -287,6 +291,7 @@ fun MainScreen(
                     activityCoefficient = activityCoefficient,
                     chatMessages = chatMessages,
                     chatLoading = chatLoading,
+                    selectedDate = selectedDate,
                     selectedDayEntries = selectedDayEntries,
                     availableDates = availableDates,
                     userProfile = userProfile,
@@ -324,6 +329,7 @@ private fun CompactLayout(
     activityCoefficient: Float,
     chatMessages: List<ChatMessage>,
     chatLoading: Boolean,
+    selectedDate: String?,
     selectedDayEntries: List<DayEntry>,
     availableDates: List<String>,
     userProfile: UserProfile?,
@@ -536,22 +542,18 @@ private fun CompactLayout(
                 modifier = Modifier.weight(weightMiddle),
                 backgroundBrush = scheme.tileTopMiddleBackgroundBrush
             ) {
-                // Индекс выбранного дня (сегодня = последний, т.к. даты отсортированы по возрастанию)
-                var selectedDateIndex by remember { mutableStateOf(availableDates.lastIndex.coerceAtLeast(0)) }
-                
-                // Обновляем индекс когда список дат меняется (например, после загрузки тестовых данных)
-                LaunchedEffect(availableDates.size) {
-                    if (selectedDateIndex >= availableDates.size || selectedDateIndex == 0) {
-                        selectedDateIndex = availableDates.lastIndex.coerceAtLeast(0)
-                    }
-                }
-                
+                // Индекс выводится из selectedDate (источник правды)
+                val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                val effectiveDate = selectedDate ?: today
+                val selectedDateIndex = availableDates.indexOf(effectiveDate)
+                    .takeIf { it >= 0 }
+                    ?: availableDates.lastIndex.coerceAtLeast(0)
+
                 InputTileContent(
                     entries = selectedDayEntries,
                     availableDates = availableDates,
                     selectedDateIndex = selectedDateIndex,
                     onDaySelected = { index ->
-                        selectedDateIndex = index
                         if (index < availableDates.size) {
                             viewModel.selectDay(availableDates[index])
                         }
@@ -634,6 +636,7 @@ private fun ExpandedLayout(
     activityCoefficient: Float,
     chatMessages: List<ChatMessage>,
     chatLoading: Boolean,
+    selectedDate: String?,
     selectedDayEntries: List<DayEntry>,
     availableDates: List<String>,
     userProfile: UserProfile?,
@@ -760,22 +763,18 @@ private fun ExpandedLayout(
                 modifier = Modifier.weight(weightMiddle),
                 backgroundBrush = scheme.tileTopMiddleBackgroundBrush
             ) {
-                // Индекс выбранного дня (сегодня = последний, т.к. даты отсортированы по возрастанию)
-                var selectedDateIndex by remember { mutableStateOf(availableDates.lastIndex.coerceAtLeast(0)) }
-                
-                // Обновляем индекс когда список дат меняется
-                LaunchedEffect(availableDates.size) {
-                    if (selectedDateIndex >= availableDates.size || selectedDateIndex == 0) {
-                        selectedDateIndex = availableDates.lastIndex.coerceAtLeast(0)
-                    }
-                }
-                
+                // Индекс выводится из selectedDate (источник правды)
+                val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
+                val effectiveDate = selectedDate ?: today
+                val selectedDateIndex = availableDates.indexOf(effectiveDate)
+                    .takeIf { it >= 0 }
+                    ?: availableDates.lastIndex.coerceAtLeast(0)
+
                 InputTileContent(
                     entries = selectedDayEntries,
                     availableDates = availableDates,
                     selectedDateIndex = selectedDateIndex,
                     onDaySelected = { index ->
-                        selectedDateIndex = index
                         if (index < availableDates.size) {
                             viewModel.selectDay(availableDates[index])
                         }

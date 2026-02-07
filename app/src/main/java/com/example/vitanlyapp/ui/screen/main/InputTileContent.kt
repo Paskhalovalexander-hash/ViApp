@@ -67,6 +67,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlin.math.absoluteValue
 
 /**
@@ -112,11 +113,12 @@ fun InputTileContent(
         }
     }
 
-    // Отслеживаем свайпы пользователя
-    LaunchedEffect(pagerState) {
+    // Отслеживаем свайпы: settledPage — после завершения анимации, ключи — актуальные данные
+    LaunchedEffect(pagerState, availableDates.size, selectedDateIndex) {
         snapshotFlow { pagerState.settledPage }
+            .distinctUntilChanged()
             .collect { page ->
-                if (page != selectedDateIndex && page < availableDates.size) {
+                if (page in availableDates.indices && page != selectedDateIndex) {
                     onDaySelected(page)
                 }
             }
@@ -135,7 +137,7 @@ fun InputTileContent(
                     modifier = Modifier.fillMaxSize()
                 ) { page ->
                     DayPageContent(
-                        entries = if (page == selectedDateIndex) entries else emptyList(),
+                        entries = if (page == pagerState.settledPage) entries else emptyList(),
                         isCollapsed = isCollapsed,
                         onEntryClick = onEntryClick,
                         isCurrentPage = page == pagerState.currentPage
