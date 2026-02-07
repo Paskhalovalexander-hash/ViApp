@@ -181,6 +181,7 @@ fun BottomTileContent(
  * @param isCollapsed Свёрнута ли плитка
  * @param isFullyExpanded Полностью ли раскрыта плитка (для показа клавиатуры)
  * @param bottomPadding Отступ снизу (для safe area)
+ * @param allowAutoIme Если false — не показывать клавиатуру автоматически (например, при drag вниз)
  * @param onExpandRequest Callback при запросе раскрытия плитки
  * @param prefillText Текст для автозаполнения поля ввода (например, из подсказки)
  * @param onPrefillConsumed Callback после применения prefillText (для сброса)
@@ -192,6 +193,7 @@ fun ChatInputBlock(
     isLoading: Boolean = false,
     isCollapsed: Boolean = false,
     isFullyExpanded: Boolean = false,
+    allowAutoIme: Boolean = true,
     bottomPadding: Dp = 0.dp,
     onExpandRequest: () -> Unit = {},
     prefillText: String = "",
@@ -213,9 +215,9 @@ fun ChatInputBlock(
     val focusRequester = remember { FocusRequester() }
     val keyboardController = LocalSoftwareKeyboardController.current
     
-    // Автоматический фокус и клавиатура только при ПОЛНОМ раскрытии
-    LaunchedEffect(isFullyExpanded) {
-        if (isFullyExpanded) {
+    // Автоматический фокус и клавиатура только при ПОЛНОМ раскрытии и если разрешено (не во время drag вниз)
+    LaunchedEffect(isFullyExpanded, allowAutoIme) {
+        if (isFullyExpanded && allowAutoIme) {
             focusRequester.requestFocus()
             keyboardController?.show()
         }

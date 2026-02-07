@@ -106,8 +106,8 @@ fun InputTileContent(
         pageCount = { availableDates.size.coerceAtLeast(1) }
     )
 
-    // Синхронизация с внешним selectedDateIndex
-    LaunchedEffect(selectedDateIndex) {
+    // Синхронизация с внешним selectedDateIndex; зависит от availableDates.size чтобы скроллить к today после загрузки
+    LaunchedEffect(selectedDateIndex, availableDates.size) {
         if (pagerState.currentPage != selectedDateIndex && selectedDateIndex < availableDates.size) {
             pagerState.animateScrollToPage(selectedDateIndex)
         }

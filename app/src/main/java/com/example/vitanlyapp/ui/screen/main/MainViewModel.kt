@@ -103,6 +103,9 @@ class MainViewModel @Inject constructor(
     private val _selectedDate = MutableStateFlow<String?>(null)
     val selectedDate: StateFlow<String?> = _selectedDate.asStateFlow()
 
+    /** Пользователь уже выбирал дату свайпом — не перезаписывать на today при первом загрузке. */
+    private val _hasUserSelectedDate = MutableStateFlow(false)
+
     /** Список доступных дат с записями (включая сегодня). Старые даты первыми, сегодня последним. */
     val availableDates: StateFlow<List<String>> = dayEntryRepository.getAllDatesFlow()
         .map { dates ->
@@ -129,7 +132,22 @@ class MainViewModel @Inject constructor(
 
     /** Выбирает день для отображения на средней плитке. */
     fun selectDay(date: String) {
+        _hasUserSelectedDate.value = true
         _selectedDate.value = date
+    }
+
+    init {
+        viewModelScope.launch {
+            var hasInitializedDate = false
+            availableDates.collect { dates ->
+                if (dates.isNotEmpty() && !hasInitializedDate) {
+                    hasInitializedDate = true
+                    if (!_hasUserSelectedDate.value) {
+                        _selectedDate.value = LocalDate.now().format(dateFormatter)
+                    }
+                }
+            }
+        }
     }
 
     /** Профиль пользователя для отображения параметров в верхней плитке */

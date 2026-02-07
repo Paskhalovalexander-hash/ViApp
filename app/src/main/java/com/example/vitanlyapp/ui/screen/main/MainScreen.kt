@@ -379,11 +379,15 @@ private fun CompactLayout(
         // Флаг: плитка полностью раскрыта (для управления клавиатурой)
         val isFullyExpanded = dragOffset.value >= maxDragOffset * 0.95f
         
+        // Скрыли IME в текущем жесте — не даём ChatInputBlock повторно показать клавиатуру
+        var imeHiddenThisGesture by remember { mutableStateOf(false) }
+        
         // Состояние для отслеживания перетаскивания
         val draggableState = rememberDraggableState { delta ->
-            // Положительный delta = свайп вниз = сворачивание → скрыть клавиатуру
-            if (delta > 0) {
+            // Положительный delta = свайп вниз = сворачивание → скрыть клавиатуру один раз за жест
+            if (delta > 0 && !imeHiddenThisGesture) {
                 keyboardController?.hide()
+                imeHiddenThisGesture = true
             }
             coroutineScope.launch {
                 val newOffset = (dragOffset.value - delta).coerceIn(0f, maxDragOffset)
@@ -542,12 +546,13 @@ private fun CompactLayout(
                 modifier = Modifier.weight(weightMiddle),
                 backgroundBrush = scheme.tileTopMiddleBackgroundBrush
             ) {
-                // Индекс выводится из selectedDate (источник правды)
+                // Индекс выводится из selectedDate (источник правды). При отсутствии — today.
                 val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
                 val effectiveDate = selectedDate ?: today
                 val selectedDateIndex = availableDates.indexOf(effectiveDate)
                     .takeIf { it >= 0 }
-                    ?: availableDates.lastIndex.coerceAtLeast(0)
+                    ?: availableDates.indexOf(today).takeIf { it >= 0 }
+                    ?: 0
 
                 InputTileContent(
                     entries = selectedDayEntries,
@@ -565,8 +570,34 @@ private fun CompactLayout(
             }
         }
 
-        // Слой 2: плитка чата — edge-to-edge, уходит за нижний край экрана
-        // Поддержка свайпов: вытягивание вверх/вниз или свайп для раскрытия/сворачивания
+        // Слой 2: прозрачная область захвата — gap между плитками + верх чата
+        // Позволяет легко начать перетаскивание из пустого пространства над плиткой чата
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .height(chatTileHeight + DesignTokens.tileSpacing)
+                .draggable(
+                    state = draggableState,
+                    orientation = Orientation.Vertical,
+                    onDragStarted = { imeHiddenThisGesture = false },
+                    onDragStopped = {
+                        imeHiddenThisGesture = false
+                        coroutineScope.launch {
+                            val threshold = maxDragOffset * 0.5f
+                            val targetOffset = if (dragOffset.value > threshold) maxDragOffset else 0f
+                            dragOffset.animateTo(targetOffset, tileAnimationSpec())
+                            if (targetOffset == maxDragOffset && activeTile != TilePosition.BOTTOM) {
+                                viewModel.onTileClick(TilePosition.BOTTOM)
+                            } else if (targetOffset == 0f && activeTile == TilePosition.BOTTOM) {
+                                viewModel.onTileClick(TilePosition.BOTTOM)
+                            }
+                        }
+                    }
+                )
+        )
+        
+        // Слой 2b: плитка чата — edge-to-edge, уходит за нижний край экрана
         Tile(
             position = TilePosition.BOTTOM,
             isExpanded = chatExpanded,
@@ -581,17 +612,17 @@ private fun CompactLayout(
                 .draggable(
                     state = draggableState,
                     orientation = Orientation.Vertical,
+                    onDragStarted = { imeHiddenThisGesture = false },
                     onDragStopped = {
-                        // При отпускании — привязка к ближайшему состоянию
+                        imeHiddenThisGesture = false
                         coroutineScope.launch {
                             val threshold = maxDragOffset * 0.5f
                             val targetOffset = if (dragOffset.value > threshold) maxDragOffset else 0f
                             dragOffset.animateTo(targetOffset, tileAnimationSpec())
-                            // Обновляем состояние ViewModel
                             if (targetOffset == maxDragOffset && activeTile != TilePosition.BOTTOM) {
                                 viewModel.onTileClick(TilePosition.BOTTOM)
                             } else if (targetOffset == 0f && activeTile == TilePosition.BOTTOM) {
-                                viewModel.onTileClick(TilePosition.BOTTOM) // Сворачиваем
+                                viewModel.onTileClick(TilePosition.BOTTOM)
                             }
                         }
                     }
@@ -614,6 +645,7 @@ private fun CompactLayout(
             isLoading = chatLoading,
             isCollapsed = !chatExpanded,
             isFullyExpanded = isFullyExpanded,
+            allowAutoIme = !imeHiddenThisGesture,
             bottomPadding = safeBottomDp,
             onExpandRequest = { viewModel.onTileClick(TilePosition.BOTTOM) },
             prefillText = chatPrefillText,
@@ -763,12 +795,13 @@ private fun ExpandedLayout(
                 modifier = Modifier.weight(weightMiddle),
                 backgroundBrush = scheme.tileTopMiddleBackgroundBrush
             ) {
-                // Индекс выводится из selectedDate (источник правды)
+                // Индекс выводится из selectedDate (источник правды). При отсутствии — today.
                 val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
                 val effectiveDate = selectedDate ?: today
                 val selectedDateIndex = availableDates.indexOf(effectiveDate)
                     .takeIf { it >= 0 }
-                    ?: availableDates.lastIndex.coerceAtLeast(0)
+                    ?: availableDates.indexOf(today).takeIf { it >= 0 }
+                    ?: 0
 
                 InputTileContent(
                     entries = selectedDayEntries,
