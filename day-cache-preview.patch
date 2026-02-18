@@ -1,0 +1,17 @@
+diff --git a/app/src/main/java/com/example/vitanlyapp/domain/repository/DayEntryRepository.kt b/app/src/main/java/com/example/vitanlyapp/domain/repository/DayEntryRepository.kt
+index dc932f9..155920d 100644
+--- a/app/src/main/java/com/example/vitanlyapp/domain/repository/DayEntryRepository.kt
++++ b/app/src/main/java/com/example/vitanlyapp/domain/repository/DayEntryRepository.kt
+@@ -26,6 +26,12 @@ interface DayEntryRepository {
+      */
+     fun getEntriesForDateFlow(date: String): Flow<List<DayEntry>>
+ 
++    /**
++     * Получить все записи за указанную дату (suspend). Для кэширования и prefetch.
++     * @param date дата в формате "yyyy-MM-dd"
++     */
++    suspend fun getEntriesForDate(date: String): List<DayEntry>
++
+     /**
+      * Получить все записи за сегодня (suspend).
+      */

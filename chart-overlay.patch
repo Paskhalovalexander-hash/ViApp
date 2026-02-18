@@ -1,0 +1,87 @@
+diff --git a/app/src/main/java/com/example/vitanlyapp/ui/screen/main/KbjuTileContent.kt b/app/src/main/java/com/example/vitanlyapp/ui/screen/main/KbjuTileContent.kt
+--- a/app/src/main/java/com/example/vitanlyapp/ui/screen/main/KbjuTileContent.kt
++++ b/app/src/main/java/com/example/vitanlyapp/ui/screen/main/KbjuTileContent.kt
+@@ -40,6 +40,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
+ import androidx.compose.ui.input.pointer.pointerInput
++import androidx.compose.ui.input.pointer.pointerInteropFilter
+ import androidx.compose.ui.platform.LocalDensity
+ import androidx.compose.ui.graphics.Brush
+@@ -158,11 +159,27 @@ fun KbjuTileContent(
+         val isExpanded = activeTile == TilePosition.TOP
+         val barsHeight = DesignTokens.barHeight * 5
+         val chartBottomInset = bottomBlockHeight + DesignTokens.tilePadding * 2
++        val chartZoneTopPadding = barsTopInsetDp + barsHeight + DesignTokens.barSpacing
++
++        val chartFadeT = when {
++            topCollapseProgress <= 0.10f -> 0f
++            topCollapseProgress >= 0.35f -> 1f
++            else -> (topCollapseProgress - 0.10f) / 0.25f
++        }
++        val chartFadeSmooth = chartFadeT * chartFadeT * (3 - 2 * chartFadeT)
++        val chartAlpha = 1f - chartFadeSmooth
++        val density = LocalDensity.current
++        val chartSlideUpPx = with(density) { 24.dp.toPx() }
++        val chartTranslationY = -chartFadeSmooth * chartSlideUpPx
+ 
+         Column(
+             modifier = Modifier
+                 .fillMaxSize()
+                 .zIndex(1f)
+                 .padding(horizontal = DesignTokens.tilePadding)
+                 .padding(top = barsTopInsetDp)
+-                .then(
+-                    if (isExpanded) Modifier.padding(bottom = chartBottomInset)
+-                    else Modifier
+-                )
+         ) {
+             KbjuBars(
+                 stats = macroStats,
+@@ -178,13 +194,32 @@ fun KbjuTileContent(
+                         else Modifier.fillMaxSize()
+                     )
+             )
+-            if (isExpanded) {
+-                KcalAreaChart(
+-                    prev = kcalWindowPrev7,
+-                    current = kcalWindowCurrent7,
+-                    next = kcalWindowNext7,
+-                    dragOffsetFraction = dragOffsetFraction,
+-                    onSelectIndex = onKcalChartSelectIndex,
+-                    modifier = Modifier
+-                        .fillMaxWidth()
+-                        .padding(top = DesignTokens.barSpacing)
+-                )
+-            }
+         }
++
++        if (isExpanded) {
++            Box(
++                modifier = Modifier
++                    .align(Alignment.TopStart)
++                    .fillMaxSize()
++                    .padding(
++                        top = chartZoneTopPadding,
++                        bottom = chartBottomInset,
++                        start = DesignTokens.tilePadding,
++                        end = DesignTokens.tilePadding
++                    )
++                    .graphicsLayer {
++                        clip = true
++                        alpha = chartAlpha
++                        translationY = chartTranslationY
++                    }
++                    .pointerInteropFilter { chartAlpha >= 0.01f }
++            ) {
++                KcalAreaChart(
++                    prev = kcalWindowPrev7,
++                    current = kcalWindowCurrent7,
++                    next = kcalWindowNext7,
++                    dragOffsetFraction = dragOffsetFraction,
++                    onSelectIndex = onKcalChartSelectIndex,
++                    modifier = Modifier.fillMaxSize()
++                )
++            }
++        }
+         }
+     }
+ }

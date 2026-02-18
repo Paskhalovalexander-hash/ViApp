@@ -1,0 +1,1339 @@
+diff --git a/app/src/main/java/com/example/vitanlyapp/data/local/dao/DayEntryDao.kt b/app/src/main/java/com/example/vitanlyapp/data/local/dao/DayEntryDao.kt
+index f5a805b..18116b4 100644
+--- a/app/src/main/java/com/example/vitanlyapp/data/local/dao/DayEntryDao.kt
++++ b/app/src/main/java/com/example/vitanlyapp/data/local/dao/DayEntryDao.kt
+@@ -127,4 +127,17 @@ interface DayEntryDao {
+      */
+     @Query("SELECT DISTINCT date FROM day_entries ORDER BY date DESC")
+     fun getAllDatesFlow(): Flow<List<String>>
++
++    /**
++     * Агрегация: сумма ккал по дням за startDate..endDate, ordered ASC.
++     * @return Flow of (date, kcalSum) - только дни с записями
++     */
++    @Query("SELECT date, COALESCE(SUM(kcal), 0) as kcalSum FROM day_entries WHERE date BETWEEN :startDate AND :endDate GROUP BY date ORDER BY date ASC")
++    fun getKcalPerDayFlow(startDate: String, endDate: String): Flow<List<DayKcalRow> >
++
++    /**
++     * Максимальная сумма ккал за один день по всей БД (для стабильной шкалы Y графика).
++     */
++    @Query("SELECT COALESCE(MAX(daySum), 0) FROM (SELECT SUM(kcal) AS daySum FROM day_entries GROUP BY date)")
++    fun getGlobalMaxDailyKcalFlow(): Flow<List<Int>>
+ }
+diff --git a/app/src/main/java/com/example/vitanlyapp/data/repository/DayEntryRepositoryImpl.kt b/app/src/main/java/com/example/vitanlyapp/data/repository/DayEntryRepositoryImpl.kt
+index 828a44a..4e0df31 100644
+--- a/app/src/main/java/com/example/vitanlyapp/data/repository/DayEntryRepositoryImpl.kt
++++ b/app/src/main/java/com/example/vitanlyapp/data/repository/DayEntryRepositoryImpl.kt
+@@ -4,12 +4,16 @@ import com.example.vitanlyapp.data.local.dao.DayEntryDao
+ import com.example.vitanlyapp.data.local.entity.DayEntryEntity
+ import com.example.vitanlyapp.data.local.entity.MealType
+ import com.example.vitanlyapp.domain.model.FoodEntry
++import com.example.vitanlyapp.data.local.dao.DayKcalRow
+ import com.example.vitanlyapp.domain.repository.DayEntry
+ import com.example.vitanlyapp.domain.repository.DayEntryRepository
++import com.example.vitanlyapp.domain.repository.DayKcalPoint
+ import com.example.vitanlyapp.domain.repository.DayTotals
++import kotlinx.coroutines.ExperimentalCoroutinesApi
+ import kotlinx.coroutines.delay
+ import kotlinx.coroutines.flow.Flow
+ import kotlinx.coroutines.flow.distinctUntilChanged
++import kotlinx.coroutines.flow.flatMapLatest
+ import kotlinx.coroutines.flow.flow
+ import kotlinx.coroutines.flow.map
+ import java.time.LocalDate
+@@ -52,6 +56,10 @@ class DayEntryRepositoryImpl @Inject constructor(
+         }
+     }
+ 
++    override suspend fun getEntriesForDate(date: String): List<DayEntry> {
++        return dayEntryDao.getEntriesForDate(date).map { it.toDomain() }
++    }
++
+     override suspend fun getTodayEntries(): List<DayEntry> {
+         return dayEntryDao.getEntriesForDate(today()).map { it.toDomain() }
+     }
+@@ -205,4 +213,23 @@ class DayEntryRepositoryImpl @Inject constructor(
+     )
+ 
+     override fun getAllDatesFlow(): Flow<List<String>> = dayEntryDao.getAllDatesFlow()
++
++    override fun getKcalPerDayFlow(startDate: String, endDate: String): Flow<List<DayKcalPoint>> =
++        dayEntryDao.getKcalPerDayFlow(startDate, endDate).map { rows ->
++            rows.map { DayKcalPoint(it.date, it.kcalSum) }
++        }
++
++    @OptIn(ExperimentalCoroutinesApi::class)
++    override fun getKcalHistoryLast7DaysFlow(): Flow<List<DayKcalPoint>> =
++        getCurrentDateFlow().flatMapLatest { endDate ->
++            val end = LocalDate.parse(endDate, dateFormatter)
++            val start = end.minusDays(6)
++            val startDate = start.format(dateFormatter)
++            dayEntryDao.getKcalPerDayFlow(startDate, endDate).map { rows ->
++                rows.map { DayKcalPoint(it.date, it.kcalSum) }
++            }
++        }
++
++    override fun getGlobalMaxDailyKcalFlow(): Flow<Int> =
++        dayEntryDao.getGlobalMaxDailyKcalFlow().map { list -> list.firstOrNull() ?: 0 }
+ }
+diff --git a/app/src/main/java/com/example/vitanlyapp/domain/repository/DayEntryRepository.kt b/app/src/main/java/com/example/vitanlyapp/domain/repository/DayEntryRepository.kt
+index dc932f9..855fd1a 100644
+--- a/app/src/main/java/com/example/vitanlyapp/domain/repository/DayEntryRepository.kt
++++ b/app/src/main/java/com/example/vitanlyapp/domain/repository/DayEntryRepository.kt
+@@ -26,6 +26,12 @@ interface DayEntryRepository {
+      */
+     fun getEntriesForDateFlow(date: String): Flow<List<DayEntry>>
+ 
++    /**
++     * Получить все записи за указанную дату (suspend). Для кэширования и prefetch.
++     * @param date дата в формате "yyyy-MM-dd"
++     */
++    suspend fun getEntriesForDate(date: String): List<DayEntry>
++
+     /**
+      * Получить все записи за сегодня (suspend).
+      */
+@@ -110,8 +116,30 @@ interface DayEntryRepository {
+      * Используется для навигации по дням на плитке продуктов.
+      */
+     fun getAllDatesFlow(): Flow<List<String>>
++
++    /**
++     * Ккал по дням за указанный период startDate..endDate inclusive.
++     * Только дни с записями, без заполнения пропусков.
++     */
++    fun getKcalPerDayFlow(startDate: String, endDate: String): Flow<List<DayKcalPoint>>
++
++    /**
++     * Ккал по дням за последние 7 дней (endDate из getCurrentDateFlow, startDate = endDate - 6).
++     * Только дни с записями, без заполнения пропусков.
++     */
++    fun getKcalHistoryLast7DaysFlow(): Flow<List<DayKcalPoint>>
++
++    /**
++     * Максимальная сумма ккал за один день по всей БД (для стабильной шкалы Y графика).
++     */
++    fun getGlobalMaxDailyKcalFlow(): Flow<Int>
+ }
+ 
++/**
++ * Точка (дата, ккал) для графика истории.
++ */
++data class DayKcalPoint(val date: String, val kcal: Int)
++
+ /**
+  * Domain-модель записи о еде.
+  * Отделена от Entity для чистой архитектуры.
+diff --git a/app/src/main/java/com/example/vitanlyapp/ui/screen/main/KbjuTileContent.kt b/app/src/main/java/com/example/vitanlyapp/ui/screen/main/KbjuTileContent.kt
+index 656f221..3fca159 100644
+--- a/app/src/main/java/com/example/vitanlyapp/ui/screen/main/KbjuTileContent.kt
++++ b/app/src/main/java/com/example/vitanlyapp/ui/screen/main/KbjuTileContent.kt
+@@ -7,8 +7,11 @@ import androidx.compose.animation.core.FastOutSlowInEasing
+ import androidx.compose.animation.core.tween
+ import androidx.compose.animation.fadeIn
+ import androidx.compose.animation.fadeOut
++import androidx.compose.foundation.Canvas
+ import androidx.compose.foundation.background
+ import androidx.compose.foundation.border
++import androidx.compose.foundation.gestures.detectDragGestures
++import androidx.compose.foundation.gestures.detectTapGestures
+ import androidx.compose.foundation.layout.Arrangement
+ import androidx.compose.foundation.layout.Box
+ import androidx.compose.foundation.layout.Row
+@@ -18,6 +21,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
+ import androidx.compose.foundation.layout.fillMaxSize
+ import androidx.compose.foundation.layout.fillMaxWidth
+ import androidx.compose.foundation.layout.height
++import androidx.compose.foundation.layout.offset
+ import androidx.compose.ui.zIndex
+ import androidx.compose.foundation.layout.padding
+ import androidx.compose.foundation.shape.RoundedCornerShape
+@@ -31,6 +35,14 @@ import androidx.compose.runtime.remember
+ import androidx.compose.runtime.setValue
+ import androidx.compose.ui.Alignment
+ import androidx.compose.ui.Modifier
++import androidx.compose.ui.geometry.Offset
++import androidx.compose.ui.graphics.Color
++import androidx.compose.ui.graphics.Path
++import androidx.compose.ui.graphics.PathEffect
++import androidx.compose.ui.graphics.drawscope.Stroke
++import androidx.compose.ui.input.pointer.pointerInput
++import androidx.compose.ui.input.pointer.pointerInteropFilter
++import androidx.compose.ui.platform.LocalDensity
+ import androidx.compose.ui.graphics.Brush
+ import androidx.compose.ui.graphics.graphicsLayer
+ import androidx.compose.ui.text.font.FontStyle
+@@ -39,6 +51,7 @@ import androidx.compose.ui.unit.dp
+ import androidx.compose.ui.unit.sp
+ import com.example.vitanlyapp.domain.model.KbjuBarStat
+ import com.example.vitanlyapp.domain.model.TilePosition
++import com.example.vitanlyapp.domain.repository.DayKcalPoint
+ import com.example.vitanlyapp.domain.repository.UserProfile
+ import com.example.vitanlyapp.ui.component.ActivityWheelPicker
+ import com.example.vitanlyapp.ui.component.KbjuBars
+@@ -53,6 +66,8 @@ import dev.chrisbanes.haze.HazeTint
+ import dev.chrisbanes.haze.hazeEffect
+ import dev.chrisbanes.haze.hazeSource
+ import kotlinx.coroutines.delay
++import java.time.LocalDate
++import java.time.format.DateTimeFormatter
+ 
+ /**
+  * Контент верхней плитки КБЖУ: волна калорий, процент, бары макронутриентов.
+@@ -71,6 +86,17 @@ fun KbjuTileContent(
+     macroStats: List<KbjuBarStat>,
+     activeTile: TilePosition?,
+     userProfile: UserProfile?,
++    kcalHistoryWindow7Days: List<DayKcalPoint>,
++    kcalWindowPrev7: List<DayKcalPoint>,
++    kcalWindowCurrent7: List<DayKcalPoint>,
++    kcalWindowNext7: List<DayKcalPoint>,
++    kcalChartYMax: Int,
++    dragOffsetFraction: Float,
++    isPagerDragging: Boolean,
++    chartSettledDirection: Int,
++    onChartSlideComplete: () -> Unit,
++    selectedChartIndex: Int,
++    onKcalChartSelectIndex: (Int) -> Unit,
+     modifier: Modifier = Modifier,
+     hazeState: HazeState? = null,
+     isActive: Boolean = true,
+@@ -90,32 +116,31 @@ fun KbjuTileContent(
+         }
+     }
+     
+-    // Фон
+-    TileBackground()
+-
+-    // Волна заполняет всю область — источник для размытия плашек
+-    // Анимация волны приостанавливается когда плитка неактивна
+-    KbjuWave(
+-        percent = kcalStat.percent,
+-        overflow = kcalStat.overflow,
+-        animateWave = waveAnimationEnabled && isActive,
+-        modifier = Modifier
+-            .fillMaxSize()
+-            .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
+-    )
++    // Стек: фон и волна сзади (zIndex 0), контент спереди (zIndex 2)
++    Box(modifier = modifier.fillMaxSize()) {
++        Box(modifier = Modifier.fillMaxSize().zIndex(0f)) {
++            TileBackground()
++            KbjuWave(
++                percent = kcalStat.percent,
++                overflow = kcalStat.overflow,
++                animateWave = waveAnimationEnabled && isActive,
++                modifier = Modifier
++                    .fillMaxSize()
++                    .then(if (hazeState != null) Modifier.hazeSource(hazeState) else Modifier)
++            )
++        }
+ 
+-    // Слои (снизу вверх): волна → цифры → бары
+-    var showCaloriePercent by remember { mutableStateOf(false) }
+-    LaunchedEffect(activeTile) {
+-        if (activeTile != null) {
+-            showCaloriePercent = false
+-        } else {
+-            delay(DesignTokens.caloriePercentAppearDelayMs.toLong())
+-            showCaloriePercent = true
++        var showCaloriePercent by remember { mutableStateOf(false) }
++        LaunchedEffect(activeTile) {
++            if (activeTile != null) {
++                showCaloriePercent = false
++            } else {
++                delay(DesignTokens.caloriePercentAppearDelayMs.toLong())
++                showCaloriePercent = true
++            }
+         }
+-    }
+ 
+-    Box(modifier = modifier.fillMaxSize()) {
++        Box(modifier = Modifier.fillMaxSize().zIndex(2f)) {
+         // Процент калорий
+         Column(
+             modifier = Modifier
+@@ -137,17 +162,31 @@ fun KbjuTileContent(
+ 
+         val isExpanded = activeTile == TilePosition.TOP
+         val barsHeight = DesignTokens.barHeight * 5
++        val chartBottomInset = bottomBlockHeight + DesignTokens.tilePadding * 2
++        val chartZoneTopPadding = barsTopInsetDp + barsHeight + DesignTokens.barSpacing
++
++        val chartFadeT = when {
++            topCollapseProgress <= 0.10f -> 0f
++            topCollapseProgress >= 0.35f -> 1f
++            else -> (topCollapseProgress - 0.10f) / 0.25f
++        }
++        val chartFadeSmooth = chartFadeT * chartFadeT * (3 - 2 * chartFadeT)
++        val chartAlpha = 1f - chartFadeSmooth
++        val density = LocalDensity.current
++        val chartSlideUpPx = with(density) { 24.dp.toPx() }
++        val chartTranslationY = -chartFadeSmooth * chartSlideUpPx
+ 
+         Column(
+             modifier = Modifier
+                 .fillMaxSize()
++                .zIndex(1f)
+                 .padding(horizontal = DesignTokens.tilePadding)
+                 .padding(top = barsTopInsetDp)
+         ) {
+             KbjuBars(
+                 stats = macroStats,
+                 labels = listOf("Белок", "Жиры", "Углеводы"),
+-                interactionsEnabled = isExpanded,
++                interactionsEnabled = true,
+                 modifier = Modifier
+                     .fillMaxWidth()
+                     .then(
+@@ -155,15 +194,41 @@ fun KbjuTileContent(
+                         else Modifier.fillMaxSize()
+                     )
+             )
+-            if (isExpanded && userProfile != null) {
+-                UserProfileDisplay(
+-                    profile = userProfile,
+-                    modifier = Modifier
+-                        .fillMaxWidth()
+-                        .padding(top = DesignTokens.barSpacing)
++        }
++
++        if (isExpanded) {
++            Box(
++                modifier = Modifier
++                    .align(Alignment.TopStart)
++                    .fillMaxSize()
++                    .padding(
++                        top = chartZoneTopPadding,
++                        bottom = chartBottomInset,
++                        start = DesignTokens.tilePadding,
++                        end = DesignTokens.tilePadding
++                    )
++                    .graphicsLayer {
++                        clip = true
++                        alpha = chartAlpha
++                        translationY = chartTranslationY
++                    }
++                    .pointerInteropFilter { chartAlpha >= 0.01f }
++            ) {
++                KcalAreaChart(
++                    prev = kcalWindowPrev7,
++                    current = kcalWindowCurrent7,
++                    next = kcalWindowNext7,
++                    yMaxKcal = kcalChartYMax,
++                    dragOffsetFraction = dragOffsetFraction,
++                    isPagerDragging = isPagerDragging,
++                    chartSettledDirection = chartSettledDirection,
++                    onChartSlideComplete = onChartSlideComplete,
++                    onSelectIndex = onKcalChartSelectIndex,
++                    modifier = Modifier.fillMaxSize()
+                 )
+             }
+         }
++        }
+     }
+ }
+ 
+@@ -309,6 +374,240 @@ private fun BottomBlock(
+     }
+ }
+ 
++private val chartLabelBottomPadding = 10.dp
++private val chartVerticalPadding = 6.dp
++private val pointRadius = 3.dp
++private val selectedPointRadius = 5.dp
++private val lineStrokeWidth = 2.dp
++private val tooltipPadding = 6.dp
++private val tooltipCornerRadius = 6.dp
++private val chartAccentColor = Color(0xFFCC7A3A)
++private val chartFillTop = chartAccentColor.copy(alpha = 0.45f)
++private val chartFillBottom = chartAccentColor.copy(alpha = 0.05f)
++private val flatLineStrokeWidth = 3.dp
++
++private const val CHART_SLIDE_DURATION_MS = 280
++
++@Composable
++private fun KcalAreaChart(
++    prev: List<DayKcalPoint>,
++    current: List<DayKcalPoint>,
++    next: List<DayKcalPoint>,
++    yMaxKcal: Int,
++    dragOffsetFraction: Float,
++    isPagerDragging: Boolean,
++    chartSettledDirection: Int,
++    onChartSlideComplete: () -> Unit,
++    onSelectIndex: (Int) -> Unit,
++    modifier: Modifier = Modifier
++) {
++    val scheme = LocalAppColorScheme.current
++    val density = LocalDensity.current
++    val labelColor = scheme.textColor.copy(alpha = 0.7f)
++    val combined = (prev.take(7) + current.take(7) + next.take(7))
++    val rawMaxKcal = combined.maxOfOrNull { it.kcal } ?: 0
++    val maxKcal = yMaxKcal.coerceAtLeast(1)
++    val allEqual = combined.size >= 2 && combined.all { it.kcal == combined[0].kcal }
++    val allZeros = rawMaxKcal == 0
++    val strokeWidthPx = with(density) {
++        (if (allEqual) flatLineStrokeWidth else lineStrokeWidth).toPx()
++    }
++    val selectedGlobalIndex = 10
++    val centerKcal = current.getOrNull(3)?.kcal ?: 0
++
++    Column(modifier = modifier) {
++        Text(
++            text = "Ккал за 7 дней",
++            fontFamily = DesignTokens.fontFamilyPlank,
++            fontWeight = FontWeight.Thin,
++            fontSize = DesignTokens.fontSizeLabel,
++            color = labelColor,
++            modifier = Modifier.padding(bottom = 4.dp)
++        )
++        BoxWithConstraints(
++            modifier = Modifier
++                .fillMaxWidth()
++                .height(150.dp)
++        ) {
++            val maxWidthPx = with(density) { maxWidth.toPx() }
++            val maxHeightPx = with(density) { maxHeight.toPx() }
++            val labelBottomPx = with(density) { chartLabelBottomPadding.toPx() }
++            val verticalPaddingPx = with(density) { chartVerticalPadding.toPx() }
++            val chartLeftPx = with(density) { 4.dp.toPx() }
++            val chartRightPx = maxWidthPx - chartLeftPx
++            val chartTopPx = verticalPaddingPx
++            val chartBottomPx = maxHeightPx - labelBottomPx - verticalPaddingPx
++            val chartWidth = (chartRightPx - chartLeftPx).coerceAtLeast(1f)
++            val chartHeight = (chartBottomPx - chartTopPx).coerceAtLeast(1f)
++            val contentWidth = chartWidth * 3f
++
++            fun contentX(i: Int) = (i.toFloat() / 20f) * contentWidth
++            fun kcalToY(kcal: Int) = chartBottomPx - (kcal.toFloat() / maxKcal) * chartHeight
++
++            val points = combined.mapIndexed { i, p ->
++                Offset(contentX(i), kcalToY(p.kcal))
++            }
++
++            val lineTranslationXAnim = remember { Animatable(0f) }
++            LaunchedEffect(chartSettledDirection, isPagerDragging, chartWidth) {
++                if (!isPagerDragging && chartSettledDirection != 0) {
++                    lineTranslationXAnim.snapTo(chartSettledDirection * chartWidth)
++                    lineTranslationXAnim.animateTo(
++                        0f,
++                        animationSpec = tween(CHART_SLIDE_DURATION_MS, easing = FastOutSlowInEasing)
++                    )
++                    onChartSlideComplete()
++                }
++            }
++
++            val lineTranslationX = lineTranslationXAnim.value
++            val markerTranslationX = if (isPagerDragging) dragOffsetFraction * chartWidth else 0f
++            val baseTx = chartLeftPx - chartWidth + lineTranslationX
++
++            fun findNearestIndexInCurrent(screenPx: Float): Int {
++                val contentX = screenPx - baseTx
++                if (contentX < chartWidth || contentX > 2 * chartWidth) return 3
++                val segment = ((contentX - chartWidth) / chartWidth * 6f).toInt().coerceIn(0, 6)
++                return segment
++            }
++
++            Box(
++                modifier = Modifier
++                    .fillMaxSize()
++                    .pointerInput(combined.size, onSelectIndex) {
++                        detectTapGestures { offset ->
++                            onSelectIndex(findNearestIndexInCurrent(offset.x))
++                        }
++                        detectDragGestures { change, _ ->
++                            change.consume()
++                            onSelectIndex(findNearestIndexInCurrent(change.position.x))
++                        }
++                    }
++            ) {
++                Canvas(modifier = Modifier.fillMaxSize()) {
++                    if (points.size >= 2) {
++                        fun xLine(x: Float) = x + baseTx
++                        val linePath = Path().apply {
++                            moveTo(xLine(points[0].x), points[0].y)
++                            for (i in 1 until points.size) {
++                                lineTo(xLine(points[i].x), points[i].y)
++                            }
++                        }
++                        if (!allZeros) {
++                            val areaPath = Path().apply {
++                                addPath(linePath)
++                                lineTo(xLine(points.last().x), chartBottomPx)
++                                lineTo(xLine(points[0].x), chartBottomPx)
++                                close()
++                            }
++                            drawPath(
++                                path = areaPath,
++                                brush = Brush.verticalGradient(
++                                    colors = listOf(chartFillTop, chartFillBottom),
++                                    startY = chartTopPx,
++                                    endY = chartBottomPx
++                                )
++                            )
++                        }
++                        drawPath(
++                            path = linePath,
++                            color = chartAccentColor,
++                            style = Stroke(width = strokeWidthPx)
++                        )
++                        val pointRadiusPx = with(density) { pointRadius.toPx() }
++                        val selectedRadiusPx = with(density) { selectedPointRadius.toPx() }
++                        val selPt = points.getOrNull(selectedGlobalIndex)
++                        points.forEachIndexed { i, pt ->
++                            val isSelected = i == selectedGlobalIndex
++                            val r = if (isSelected) selectedRadiusPx else pointRadiusPx
++                            val cx = if (isSelected) pt.x + baseTx + markerTranslationX else pt.x + baseTx
++                            if (isSelected) {
++                                drawCircle(
++                                    color = chartAccentColor.copy(alpha = 0.4f),
++                                    radius = selectedRadiusPx + 3f,
++                                    center = Offset(cx, pt.y)
++                                )
++                            }
++                            drawCircle(
++                                color = chartAccentColor,
++                                radius = r,
++                                center = Offset(cx, pt.y)
++                            )
++                        }
++                        if (points.isNotEmpty() && selPt != null) {
++                            val markerX = selPt.x + baseTx + markerTranslationX
++                            val dashPx = with(density) { 6.dp.toPx() }
++                            val gapPx = with(density) { 4.dp.toPx() }
++                            drawLine(
++                                color = chartAccentColor.copy(alpha = 0.6f),
++                                start = Offset(markerX, selPt.y),
++                                end = Offset(markerX, chartBottomPx),
++                                strokeWidth = with(density) { 1.dp.toPx() },
++                                pathEffect = PathEffect.dashPathEffect(floatArrayOf(dashPx, gapPx), 0f)
++                            )
++                        }
++                    }
++                }
++                if (current.isNotEmpty()) {
++                    val selPt = points.getOrNull(selectedGlobalIndex)
++                    val selectedXScreen = (selPt?.x ?: contentWidth / 2f) + baseTx + markerTranslationX
++                    val tooltipWidthPx = with(density) { 48.dp.toPx() }
++                    val tooltipHeightPx = with(density) { 24.dp.toPx() }
++                    val maxLeftPx = chartRightPx - tooltipWidthPx
++                    val tooltipLeftPx = (selectedXScreen - tooltipWidthPx / 2f).coerceIn(chartLeftPx, maxLeftPx.coerceAtLeast(chartLeftPx))
++                    val tooltipTopPx = (selPt?.y?.minus(tooltipHeightPx) ?: chartTopPx).coerceIn(chartTopPx, (chartBottomPx - tooltipHeightPx).coerceAtLeast(chartTopPx))
++                    Box(
++                        modifier = Modifier
++                            .offset(
++                                x = with(density) { tooltipLeftPx.toDp() },
++                                y = with(density) { tooltipTopPx.toDp() }
++                            )
++                            .align(Alignment.TopStart)
++                            .clip(RoundedCornerShape(tooltipCornerRadius))
++                            .background(scheme.textColor.copy(alpha = 0.9f))
++                            .padding(horizontal = tooltipPadding, vertical = tooltipPadding / 2)
++                    ) {
++                        Text(
++                            text = "$centerKcal ккал",
++                            fontFamily = DesignTokens.fontFamilyPlank,
++                            fontWeight = FontWeight.Thin,
++                            fontSize = 11.sp,
++                            color = scheme.tileBackgroundColor
++                        )
++                    }
++                }
++            }
++        }
++        Row(
++            modifier = Modifier
++                .fillMaxWidth()
++                .padding(top = 2.dp),
++            horizontalArrangement = Arrangement.SpaceBetween
++        ) {
++            (0..6).forEach { i ->
++                val labelText = current.getOrNull(i)?.date?.let { dateStr ->
++                    runCatching {
++                        LocalDate.parse(dateStr, DateTimeFormatter.ISO_LOCAL_DATE)
++                            .format(DateTimeFormatter.ofPattern("dd.MM"))
++                    }.getOrElse { dateStr }
++                } ?: ""
++                Box(
++                    modifier = Modifier.weight(1f),
++                    contentAlignment = Alignment.Center
++                ) {
++                    Text(
++                        text = labelText,
++                        fontFamily = DesignTokens.fontFamilyPlank,
++                        fontWeight = FontWeight.Thin,
++                        fontSize = 9.sp,
++                        color = labelColor
++                    )
++                }
++            }
++        }
++    }
++}
++
+ /**
+  * Отображение параметров профиля (кроме веса и активности).
+  * Каждый параметр — в отдельной строке.
+diff --git a/app/src/main/java/com/example/vitanlyapp/ui/screen/main/MainScreen.kt b/app/src/main/java/com/example/vitanlyapp/ui/screen/main/MainScreen.kt
+index 4cc721a..76bbadf 100644
+--- a/app/src/main/java/com/example/vitanlyapp/ui/screen/main/MainScreen.kt
++++ b/app/src/main/java/com/example/vitanlyapp/ui/screen/main/MainScreen.kt
+@@ -89,6 +89,7 @@ import com.example.vitanlyapp.domain.model.KbjuBarStat
+ import com.example.vitanlyapp.domain.model.ThemeMode
+ import com.example.vitanlyapp.domain.model.TilePosition
+ import com.example.vitanlyapp.domain.repository.DayEntry
++import com.example.vitanlyapp.domain.repository.DayKcalPoint
+ import com.example.vitanlyapp.domain.repository.UserProfile
+ import com.example.vitanlyapp.ui.component.NoiseOverlay
+ import com.example.vitanlyapp.ui.component.Tile
+@@ -137,7 +138,32 @@ fun MainScreen(
+     val chatLoading by viewModel.chatLoading.collectAsStateWithLifecycle()
+     val themeMode by viewModel.themeMode.collectAsStateWithLifecycle()
+     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
+-    
++    val kcalHistoryWindow7Days by viewModel.kcalHistoryWindow7Days.collectAsStateWithLifecycle()
++    val kcalWindowPrev7 by viewModel.kcalWindowPrev7.collectAsStateWithLifecycle()
++    val kcalWindowCurrent7 by viewModel.kcalWindowCurrent7.collectAsStateWithLifecycle()
++    val kcalWindowNext7 by viewModel.kcalWindowNext7.collectAsStateWithLifecycle()
++    val kcalChartYMax by viewModel.kcalChartYMax.collectAsStateWithLifecycle()
++    val entriesCache by viewModel.entriesCacheSnapshot.collectAsStateWithLifecycle()
++
++    var dragPage by remember { mutableStateOf(0) }
++    var dragOffset by remember { mutableStateOf(0f) }
++    var isDragging by remember { mutableStateOf(false) }
++    var settledDirection by remember { mutableStateOf(0) }
++    val onDayDragProgress: (Int, Float) -> Unit = { page, offset ->
++        dragPage = page
++        dragOffset = offset
++        isDragging = true
++    }
++    val onDaySettled: (Int) -> Unit = { newPage ->
++        val wasDragging = isDragging
++        isDragging = false
++        if (wasDragging) {
++            val delta = newPage - dragPage
++            settledDirection = if (delta == 1 || delta == -1) delta else 0
++        }
++    }
++    val onChartSlideComplete: () -> Unit = { settledDirection = 0 }
++
+     // Навигация по дням на средней плитке (selectedDate — источник правды)
+     val selectedDate by viewModel.selectedDate.collectAsStateWithLifecycle()
+     val selectedDayEntries by viewModel.selectedDayEntries.collectAsStateWithLifecycle()
+@@ -312,7 +338,24 @@ fun MainScreen(
+                             selectedDate = selectedDate,
+                             selectedDayEntries = selectedDayEntries,
+                             availableDates = availableDates,
++                            entriesCache = entriesCache,
+                             userProfile = userProfile,
++                            kcalHistoryWindow7Days = kcalHistoryWindow7Days,
++                            kcalWindowPrev7 = kcalWindowPrev7,
++                            kcalWindowCurrent7 = kcalWindowCurrent7,
++                            kcalWindowNext7 = kcalWindowNext7,
++                            kcalChartYMax = kcalChartYMax,
++                            pagerDragPage = dragPage,
++                            pagerDragOffset = dragOffset,
++                            isPagerDragging = isDragging,
++                            chartSettledDirection = settledDirection,
++                            onDayDragProgress = onDayDragProgress,
++                            onDaySettled = onDaySettled,
++                            onChartSlideComplete = onChartSlideComplete,
++                            onKcalChartSelectIndex = { index ->
++                                kcalHistoryWindow7Days.getOrNull(index)?.date?.let { viewModel.selectDay(it) }
++                            },
++                            onPreviewDay = viewModel::setPreviewDate,
+                             onEntryClick = { selectedEntry = it },
+                             onEntryExpandRequest = { entry, _ ->
+                                 overlayEntry = entry
+@@ -340,7 +383,24 @@ fun MainScreen(
+                             selectedDate = selectedDate,
+                             selectedDayEntries = selectedDayEntries,
+                             availableDates = availableDates,
++                            entriesCache = entriesCache,
+                             userProfile = userProfile,
++                            kcalHistoryWindow7Days = kcalHistoryWindow7Days,
++                            kcalWindowPrev7 = kcalWindowPrev7,
++                            kcalWindowCurrent7 = kcalWindowCurrent7,
++                            kcalWindowNext7 = kcalWindowNext7,
++                            kcalChartYMax = kcalChartYMax,
++                            pagerDragPage = dragPage,
++                            pagerDragOffset = dragOffset,
++                            isPagerDragging = isDragging,
++                            chartSettledDirection = settledDirection,
++                            onDayDragProgress = onDayDragProgress,
++                            onDaySettled = onDaySettled,
++                            onChartSlideComplete = onChartSlideComplete,
++                            onKcalChartSelectIndex = { index ->
++                                kcalHistoryWindow7Days.getOrNull(index)?.date?.let { viewModel.selectDay(it) }
++                            },
++                            onPreviewDay = viewModel::setPreviewDate,
+                             onEntryClick = { selectedEntry = it },
+                             onEntryExpandRequest = { entry, _ ->
+                                 overlayEntry = entry
+@@ -755,7 +815,22 @@ private fun CompactLayout(
+     selectedDate: String?,
+     selectedDayEntries: List<DayEntry>,
+     availableDates: List<String>,
++    entriesCache: Map<String, List<DayEntry>>,
+     userProfile: UserProfile?,
++    kcalHistoryWindow7Days: List<DayKcalPoint>,
++    kcalWindowPrev7: List<DayKcalPoint>,
++    kcalWindowCurrent7: List<DayKcalPoint>,
++    kcalWindowNext7: List<DayKcalPoint>,
++    kcalChartYMax: Int,
++    pagerDragPage: Int,
++    pagerDragOffset: Float,
++    isPagerDragging: Boolean,
++    chartSettledDirection: Int,
++    onDayDragProgress: (Int, Float) -> Unit,
++    onDaySettled: (Int) -> Unit,
++    onChartSlideComplete: () -> Unit,
++    onKcalChartSelectIndex: (Int) -> Unit,
++    onPreviewDay: (String?) -> Unit,
+     onEntryClick: (DayEntry) -> Unit,
+     onEntryExpandRequest: (DayEntry, Rect) -> Unit,
+     onShowResetDialog: () -> Unit,
+@@ -936,6 +1011,7 @@ private fun CompactLayout(
+         val plankFadeAlpha = 1f - plankFadeT * (1f - DesignTokens.topTilePlanksMinAlpha)
+         val plankSlideUpPx = with(density) { DesignTokens.topTilePlanksSlideUpDp.toPx() }
+         val plankTranslationY = -plankSlideUpPx * plankFadeT
++        val plankHitHeightDp = (180f * (1 - plankFadeT)).dp
+ 
+         val controlsFadeAlpha = when {
+             topCollapseProgress <= DesignTokens.topTileControlsFadeStartProgress -> 1f
+@@ -977,60 +1053,47 @@ private fun CompactLayout(
+                 modifier = Modifier.fillMaxWidth().height(topHeightDp),
+                 backgroundBrush = scheme.tileTopMiddleBackgroundBrush,
+                 overflowContent = {
+-                    Box(
+-                        modifier = Modifier
+-                            .graphicsLayer {
+-                                alpha = plankFadeAlpha
+-                                translationY = plankTranslationY
+-                            }
+-                            .pointerInteropFilter { _ ->
+-                                plankFadeAlpha < DesignTokens.topTilePlanksInteractionAlphaThreshold
+-                            }
+-                    ) {
+-                        KbjuTileWheelOverflowContent(
+-                            isExpanded = activeTile == TilePosition.TOP,
+-                            currentWeight = currentWeight,
+-                            onWeightChange = viewModel::updateWeight,
+-                            activityCoefficient = activityCoefficient,
+-                            onActivityChange = viewModel::updateActivityCoefficient,
+-                            hazeState = kbjuHazeState,
+-                            topCollapseProgress = topCollapseProgress
+-                        )
+-                    }
+-                },
+-                tileTransitionDurationMs = DesignTokens.topMiddlePostSnapDurationMs,
+-                collapseProgress = topCollapseProgress,
+-                tapToExpandOverlay = plankFadeAlpha < DesignTokens.topTilePlanksInteractionAlphaThreshold
+-            ) {
+-                val scheme = LocalAppColorScheme.current
+-                Box(modifier = Modifier.fillMaxSize()) {
+-                    KbjuTileContent(
+-                        kcalStat = kcalStat,
+-                        macroStats = macroStats,
+-                        activeTile = activeTile,
+-                        userProfile = userProfile,
+-                        hazeState = kbjuHazeState,
+-                        isActive = topTilesActive,
+-                        topCollapseProgress = topCollapseProgress
+-                    )
+-                    
+-                    // Кнопки управления — фейд + сдвиг вверх синхронно с collapse (tap + splitter); неактивны в среднем/свёрнутом состоянии
+-                    Box(
+-                        modifier = Modifier
+-                            .align(Alignment.TopEnd)
+-                            .graphicsLayer {
+-                                alpha = controlsFadeAlpha
+-                                translationY = controlsTranslationY
+-                            }
+-                            .pointerInteropFilter { _ ->
+-                                controlsFadeAlpha < DesignTokens.topTilePlanksInteractionAlphaThreshold
+-                            }
+-                    ) {
++                    Box(modifier = Modifier.fillMaxSize()) {
++                        Box(
++                            modifier = Modifier
++                                .align(Alignment.BottomCenter)
++                                .fillMaxWidth()
++                                .height(plankHitHeightDp)
++                                .graphicsLayer {
++                                    alpha = plankFadeAlpha
++                                    translationY = plankTranslationY
++                                }
++                                .pointerInteropFilter { _ ->
++                                    plankFadeAlpha < DesignTokens.topTilePlanksInteractionAlphaThreshold
++                                }
++                        ) {
++                            KbjuTileWheelOverflowContent(
++                                isExpanded = activeTile == TilePosition.TOP,
++                                currentWeight = currentWeight,
++                                onWeightChange = viewModel::updateWeight,
++                                activityCoefficient = activityCoefficient,
++                                onActivityChange = viewModel::updateActivityCoefficient,
++                                hazeState = kbjuHazeState,
++                                topCollapseProgress = topCollapseProgress
++                            )
++                        }
++                        Box(
++                            modifier = Modifier
++                                .align(Alignment.TopEnd)
++                                .graphicsLayer {
++                                    alpha = controlsFadeAlpha
++                                    translationY = controlsTranslationY
++                                }
++                                .then(
++                                    if (controlsFadeAlpha < DesignTokens.topTilePlanksInteractionAlphaThreshold)
++                                        Modifier.pointerInteropFilter { true }
++                                    else Modifier
++                                )
++                        ) {
+                             Row(
+                                 modifier = Modifier.padding(4.dp),
+                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
+                             ) {
+-                                // Кнопка сброса данных
+                                 Box(
+                                     modifier = Modifier
+                                         .size(36.dp)
+@@ -1043,12 +1106,10 @@ private fun CompactLayout(
+                                     Icon(
+                                         imageVector = Icons.Default.DeleteForever,
+                                         contentDescription = "Сбросить данные",
+-                                        tint = scheme.textColor.copy(alpha = 0.5f),
++                                        tint = LocalAppColorScheme.current.textColor.copy(alpha = 0.5f),
+                                         modifier = Modifier.size(22.dp)
+                                     )
+                                 }
+-
+-                                // Кнопка переключения темы
+                                 Box(
+                                     modifier = Modifier
+                                         .size(36.dp)
+@@ -1061,12 +1122,10 @@ private fun CompactLayout(
+                                     Icon(
+                                         imageVector = Icons.Default.Palette,
+                                         contentDescription = "Переключить тему",
+-                                        tint = scheme.textColor.copy(alpha = 0.7f),
++                                        tint = LocalAppColorScheme.current.textColor.copy(alpha = 0.7f),
+                                         modifier = Modifier.size(22.dp)
+                                     )
+                                 }
+-
+-                                // Кнопка заполнения тестовых данных
+                                 Box(
+                                     modifier = Modifier
+                                         .size(36.dp)
+@@ -1079,13 +1138,38 @@ private fun CompactLayout(
+                                     Icon(
+                                         imageVector = Icons.Default.Science,
+                                         contentDescription = "Тестовые данные",
+-                                        tint = scheme.textColor.copy(alpha = 0.5f),
++                                        tint = LocalAppColorScheme.current.textColor.copy(alpha = 0.5f),
+                                         modifier = Modifier.size(22.dp)
+                                     )
+                                 }
+                             }
++                        }
+                     }
+-                }
++                },
++                tileTransitionDurationMs = DesignTokens.topMiddlePostSnapDurationMs,
++                collapseProgress = topCollapseProgress,
++                tapToExpandOverlay = plankFadeAlpha < DesignTokens.topTilePlanksInteractionAlphaThreshold
++            ) {
++                KbjuTileContent(
++                    kcalStat = kcalStat,
++                    macroStats = macroStats,
++                    activeTile = activeTile,
++                    userProfile = userProfile,
++                    kcalHistoryWindow7Days = kcalHistoryWindow7Days,
++                    kcalWindowPrev7 = kcalWindowPrev7,
++                    kcalWindowCurrent7 = kcalWindowCurrent7,
++                    kcalWindowNext7 = kcalWindowNext7,
++                    kcalChartYMax = kcalChartYMax,
++                    dragOffsetFraction = pagerDragOffset,
++                    isPagerDragging = isPagerDragging,
++                    chartSettledDirection = chartSettledDirection,
++                    onChartSlideComplete = onChartSlideComplete,
++                    selectedChartIndex = 3,
++                    onKcalChartSelectIndex = onKcalChartSelectIndex,
++                    hazeState = kbjuHazeState,
++                    isActive = topTilesActive,
++                    topCollapseProgress = topCollapseProgress
++                )
+             }
+ 
+             Tile(
+@@ -1110,11 +1194,15 @@ private fun CompactLayout(
+                     entries = selectedDayEntries,
+                     availableDates = availableDates,
+                     selectedDateIndex = selectedDateIndex,
++                    getCachedEntries = { date -> entriesCache[date] },
+                     onDaySelected = { index ->
+                         if (index < availableDates.size) {
+                             viewModel.selectDay(availableDates[index])
+                         }
+                     },
++                    onPreviewDay = onPreviewDay,
++                    onDayDragProgress = onDayDragProgress,
++                    onDaySettled = onDaySettled,
+                     isCollapsed = activeTile != null && activeTile != TilePosition.MIDDLE,
+                     onEntryClick = onEntryClick,
+                     onEntryExpandRequest = onEntryExpandRequest,
+@@ -1234,7 +1322,22 @@ private fun ExpandedLayout(
+     selectedDate: String?,
+     selectedDayEntries: List<DayEntry>,
+     availableDates: List<String>,
++    entriesCache: Map<String, List<DayEntry>>,
+     userProfile: UserProfile?,
++    kcalHistoryWindow7Days: List<DayKcalPoint>,
++    kcalWindowPrev7: List<DayKcalPoint>,
++    kcalWindowCurrent7: List<DayKcalPoint>,
++    kcalWindowNext7: List<DayKcalPoint>,
++    kcalChartYMax: Int,
++    pagerDragPage: Int,
++    pagerDragOffset: Float,
++    isPagerDragging: Boolean,
++    chartSettledDirection: Int,
++    onDayDragProgress: (Int, Float) -> Unit,
++    onDaySettled: (Int) -> Unit,
++    onChartSlideComplete: () -> Unit,
++    onKcalChartSelectIndex: (Int) -> Unit,
++    onPreviewDay: (String?) -> Unit,
+     onEntryClick: (DayEntry) -> Unit,
+     onEntryExpandRequest: (DayEntry, Rect) -> Unit,
+     onShowResetDialog: () -> Unit,
+@@ -1286,7 +1389,8 @@ private fun ExpandedLayout(
+     val plankFadeAlphaExpanded = 1f - plankFadeTExpanded * (1f - DesignTokens.topTilePlanksMinAlpha)
+     val plankSlideUpPxExpanded = with(density) { DesignTokens.topTilePlanksSlideUpDp.toPx() }
+     val plankTranslationYExpanded = -plankSlideUpPxExpanded * plankFadeTExpanded
+-    
++    val plankHitHeightDpExpanded = (180f * (1 - plankFadeTExpanded)).dp
++
+     // Текст для автозаполнения поля ввода (из подсказки)
+     var chatPrefillText by remember { mutableStateOf("") }
+ 
+@@ -1303,56 +1407,47 @@ private fun ExpandedLayout(
+                 modifier = Modifier.weight(weightTop),
+                 backgroundBrush = scheme.tileTopMiddleBackgroundBrush,
+                 overflowContent = {
+-                    Box(
+-                        modifier = Modifier
+-                            .graphicsLayer {
+-                                alpha = plankFadeAlphaExpanded
+-                                translationY = plankTranslationYExpanded
+-                            }
+-                            .pointerInteropFilter { _ ->
+-                                plankFadeAlphaExpanded < DesignTokens.topTilePlanksInteractionAlphaThreshold
+-                            }
+-                    ) {
+-                        KbjuTileWheelOverflowContent(
+-                            isExpanded = activeTile == TilePosition.TOP,
+-                            currentWeight = currentWeight,
+-                            onWeightChange = viewModel::updateWeight,
+-                            activityCoefficient = activityCoefficient,
+-                            onActivityChange = viewModel::updateActivityCoefficient,
+-                            hazeState = kbjuHazeState,
+-                            topCollapseProgress = topCollapseProgress
+-                        )
+-                    }
+-                },
+-                tapToExpandOverlay = plankFadeAlphaExpanded < DesignTokens.topTilePlanksInteractionAlphaThreshold
+-            ) {
+-                Box(modifier = Modifier.fillMaxSize()) {
+-                    KbjuTileContent(
+-                        kcalStat = kcalStat,
+-                        macroStats = macroStats,
+-                        activeTile = activeTile,
+-                        userProfile = userProfile,
+-                        hazeState = kbjuHazeState,
+-                        topCollapseProgress = topCollapseProgress
+-                    )
+-                    
+-                    // Кнопки управления — фейд/сдвиг по progress; неактивны в среднем/свёрнутом состоянии
+-                    Box(
+-                        modifier = Modifier
+-                            .align(Alignment.TopEnd)
+-                            .graphicsLayer {
+-                                alpha = controlsFadeAlphaExpanded
+-                                translationY = controlsTranslationYExpanded
+-                            }
+-                            .pointerInteropFilter { _ ->
+-                                controlsFadeAlphaExpanded < DesignTokens.topTilePlanksInteractionAlphaThreshold
+-                            }
+-                    ) {
+-                        Row(
++                    Box(modifier = Modifier.fillMaxSize()) {
++                        Box(
++                            modifier = Modifier
++                                .align(Alignment.BottomCenter)
++                                .fillMaxWidth()
++                                .height(plankHitHeightDpExpanded)
++                                .graphicsLayer {
++                                    alpha = plankFadeAlphaExpanded
++                                    translationY = plankTranslationYExpanded
++                                }
++                                .pointerInteropFilter { _ ->
++                                    plankFadeAlphaExpanded < DesignTokens.topTilePlanksInteractionAlphaThreshold
++                                }
++                        ) {
++                            KbjuTileWheelOverflowContent(
++                                isExpanded = activeTile == TilePosition.TOP,
++                                currentWeight = currentWeight,
++                                onWeightChange = viewModel::updateWeight,
++                                activityCoefficient = activityCoefficient,
++                                onActivityChange = viewModel::updateActivityCoefficient,
++                                hazeState = kbjuHazeState,
++                                topCollapseProgress = topCollapseProgress
++                            )
++                        }
++                        Box(
++                            modifier = Modifier
++                                .align(Alignment.TopEnd)
++                                .graphicsLayer {
++                                    alpha = controlsFadeAlphaExpanded
++                                    translationY = controlsTranslationYExpanded
++                                }
++                                .then(
++                                    if (controlsFadeAlphaExpanded < DesignTokens.topTilePlanksInteractionAlphaThreshold)
++                                        Modifier.pointerInteropFilter { true }
++                                    else Modifier
++                                )
++                        ) {
++                            Row(
+                                 modifier = Modifier.padding(4.dp),
+                                 horizontalArrangement = Arrangement.spacedBy(4.dp)
+                             ) {
+-                                // Кнопка сброса данных
+                                 Box(
+                                     modifier = Modifier
+                                         .size(36.dp)
+@@ -1369,8 +1464,6 @@ private fun ExpandedLayout(
+                                         modifier = Modifier.size(22.dp)
+                                     )
+                                 }
+-
+-                                // Кнопка переключения темы
+                                 Box(
+                                     modifier = Modifier
+                                         .size(36.dp)
+@@ -1387,8 +1480,6 @@ private fun ExpandedLayout(
+                                         modifier = Modifier.size(22.dp)
+                                     )
+                                 }
+-
+-                                // Кнопка заполнения тестовых данных
+                                 Box(
+                                     modifier = Modifier
+                                         .size(36.dp)
+@@ -1406,8 +1497,30 @@ private fun ExpandedLayout(
+                                     )
+                                 }
+                             }
++                        }
+                     }
+-                }
++                },
++                tapToExpandOverlay = plankFadeAlphaExpanded < DesignTokens.topTilePlanksInteractionAlphaThreshold
++            ) {
++                KbjuTileContent(
++                    kcalStat = kcalStat,
++                    macroStats = macroStats,
++                    activeTile = activeTile,
++                    userProfile = userProfile,
++                    kcalHistoryWindow7Days = kcalHistoryWindow7Days,
++                    kcalWindowPrev7 = kcalWindowPrev7,
++                    kcalWindowCurrent7 = kcalWindowCurrent7,
++                    kcalWindowNext7 = kcalWindowNext7,
++                    kcalChartYMax = kcalChartYMax,
++                    dragOffsetFraction = pagerDragOffset,
++                    isPagerDragging = isPagerDragging,
++                    chartSettledDirection = chartSettledDirection,
++                    onChartSlideComplete = onChartSlideComplete,
++                    selectedChartIndex = 3,
++                    onKcalChartSelectIndex = onKcalChartSelectIndex,
++                    hazeState = kbjuHazeState,
++                    topCollapseProgress = topCollapseProgress
++                )
+             }
+ 
+             Tile(
+@@ -1430,11 +1543,15 @@ private fun ExpandedLayout(
+                     entries = selectedDayEntries,
+                     availableDates = availableDates,
+                     selectedDateIndex = selectedDateIndex,
++                    getCachedEntries = { date -> entriesCache[date] },
+                     onDaySelected = { index ->
+                         if (index < availableDates.size) {
+                             viewModel.selectDay(availableDates[index])
+                         }
+                     },
++                    onPreviewDay = onPreviewDay,
++                    onDayDragProgress = onDayDragProgress,
++                    onDaySettled = onDaySettled,
+                     isCollapsed = activeTile != null && activeTile != TilePosition.MIDDLE,
+                     onEntryClick = onEntryClick,
+                     onEntryExpandRequest = onEntryExpandRequest
+diff --git a/app/src/main/java/com/example/vitanlyapp/ui/screen/main/MainViewModel.kt b/app/src/main/java/com/example/vitanlyapp/ui/screen/main/MainViewModel.kt
+index 83429bf..dd316bb 100644
+--- a/app/src/main/java/com/example/vitanlyapp/ui/screen/main/MainViewModel.kt
++++ b/app/src/main/java/com/example/vitanlyapp/ui/screen/main/MainViewModel.kt
+@@ -19,6 +19,7 @@ import com.example.vitanlyapp.domain.orchestrator.OrchestratorResult
+ import com.example.vitanlyapp.domain.orchestrator.UiActionType
+ import com.example.vitanlyapp.domain.repository.DayEntry
+ import com.example.vitanlyapp.domain.repository.DayEntryRepository
++import com.example.vitanlyapp.domain.repository.DayKcalPoint
+ import com.example.vitanlyapp.domain.repository.KbjuRepository
+ import com.example.vitanlyapp.domain.repository.ThemeRepository
+ import com.example.vitanlyapp.domain.repository.UserProfile
+@@ -31,11 +32,13 @@ import kotlinx.coroutines.flow.asStateFlow
+ import java.util.UUID
+ import kotlinx.coroutines.flow.flatMapLatest
+ import kotlinx.coroutines.flow.map
++import kotlinx.coroutines.flow.combine
+ import kotlinx.coroutines.flow.stateIn
+ import kotlinx.coroutines.launch
+ import java.time.LocalDate
+ import java.time.format.DateTimeFormatter
+ import javax.inject.Inject
++import java.util.LinkedHashMap
+ 
+ @OptIn(ExperimentalCoroutinesApi::class)
+ @HiltViewModel
+@@ -104,16 +107,121 @@ class MainViewModel @Inject constructor(
+     private val _selectedDate = MutableStateFlow<String?>(null)
+     val selectedDate: StateFlow<String?> = _selectedDate.asStateFlow()
+ 
++    /** Превью даты во время свайпа пейджера; null когда пейджер settled. */
++    private val _previewDate = MutableStateFlow<String?>(null)
++    val previewDate: StateFlow<String?> = _previewDate.asStateFlow()
++
++    /** Дата для отображения: превью во время драга, иначе selectedDate, иначе сегодня. Используется для графика и кэша. */
++    val displayedDate: StateFlow<String> = combine(
++        _previewDate,
++        _selectedDate,
++        dayEntryRepository.getCurrentDateFlow()
++    ) { prev, sel, today -> prev ?: sel ?: today }
++        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LocalDate.now().format(dateFormatter))
++
++    /** Эффективная дата для графика (алиас displayedDate для совместимости). */
++    val effectiveSelectedDate: StateFlow<String> = displayedDate
++
++    /** Список из 7 дат окна [displayedDate-3 .. displayedDate+3] для графика. */
++    val kcalWindow: StateFlow<List<String>> = displayedDate
++        .map { eff ->
++            val center = LocalDate.parse(eff, dateFormatter)
++            val start = center.minusDays(3)
++            (0..6).map { start.plusDays(it.toLong()).format(dateFormatter) }
++        }
++        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
++
++    /** Эффективный центр для трёх окон графика: selectedDate ?: today. Обновляется только при смене selectedDate. */
++    private val effectiveCenterDate: StateFlow<String> = combine(
++        _selectedDate,
++        dayEntryRepository.getCurrentDateFlow()
++    ) { sel, today -> sel ?: today }
++        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), LocalDate.now().format(dateFormatter))
++
++    private fun buildKcalWindowFlow(centerDateStr: String): kotlinx.coroutines.flow.Flow<List<DayKcalPoint>> {
++        val center = LocalDate.parse(centerDateStr, dateFormatter)
++        val start = center.minusDays(3)
++        val startStr = start.format(dateFormatter)
++        val endStr = center.plusDays(3).format(dateFormatter)
++        val allDates = (0..6).map { start.plusDays(it.toLong()) }.map { it.format(dateFormatter) }
++        return dayEntryRepository.getKcalPerDayFlow(startStr, endStr).map { rawList ->
++            val byDate = rawList.associateBy { it.date }
++            allDates.map { d -> DayKcalPoint(d, byDate[d]?.kcal ?: 0) }
++        }
++    }
++
++    /** 7 дней ккал: центр effectiveCenterDate - 1. Для плавного синка графика с пейджером. */
++    val kcalWindowPrev7: StateFlow<List<DayKcalPoint>> = effectiveCenterDate
++        .flatMapLatest { center ->
++            val prevCenter = LocalDate.parse(center, dateFormatter).minusDays(1).format(dateFormatter)
++            buildKcalWindowFlow(prevCenter)
++        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
++
++    /** 7 дней ккал: центр effectiveCenterDate. */
++    val kcalWindowCurrent7: StateFlow<List<DayKcalPoint>> = effectiveCenterDate
++        .flatMapLatest { buildKcalWindowFlow(it) }
++        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
++
++    /** 7 дней ккал: центр effectiveCenterDate + 1. */
++    val kcalWindowNext7: StateFlow<List<DayKcalPoint>> = effectiveCenterDate
++        .flatMapLatest { center ->
++            val nextCenter = LocalDate.parse(center, dateFormatter).plusDays(1).format(dateFormatter)
++            buildKcalWindowFlow(nextCenter)
++        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
++
++    private val entriesCacheLock = Any()
++    private val entriesCache = LinkedHashMap<String, List<DayEntry>>(60, 0.75f, true)
++    private val _entriesCacheSnapshot = MutableStateFlow<Map<String, List<DayEntry>>>(emptyMap())
++    val entriesCacheSnapshot: StateFlow<Map<String, List<DayEntry>>> = _entriesCacheSnapshot.asStateFlow()
++
++    fun getCachedEntries(date: String): List<DayEntry>? = synchronized(entriesCacheLock) { entriesCache[date] }
++
++    fun setPreviewDate(date: String?) {
++        _previewDate.value = date
++    }
++
++    private suspend fun warmCache(dates: List<String>) {
++        val toLoad = dates.filter { synchronized(entriesCacheLock) { it !in entriesCache } }
++        toLoad.forEach { date ->
++            val list = dayEntryRepository.getEntriesForDate(date)
++            synchronized(entriesCacheLock) {
++                entriesCache[date] = list
++                while (entriesCache.size > 60) {
++                    entriesCache.remove(entriesCache.keys.first())
++                }
++                _entriesCacheSnapshot.value = HashMap(entriesCache)
++            }
++        }
++    }
++
+     /** Пользователь уже выбирал дату свайпом — не перезаписывать на today при первом загрузке. */
+     private val _hasUserSelectedDate = MutableStateFlow(false)
+ 
+-    /** Список доступных дат с записями (включая сегодня). Старые даты первыми, сегодня последним. */
+-    val availableDates: StateFlow<List<String>> = dayEntryRepository.getAllDatesFlow()
+-        .map { dates ->
+-            val today = LocalDate.now().format(dateFormatter)
+-            (listOf(today) + dates).distinct().sorted() // Старые слева, новые справа
++    /**
++     * Список всех календарных дней от самой ранней даты в БД до сегодня включительно.
++     * Если БД пуста — только [today]. Хронологический порядок: старые → новые (сегодня последний).
++     */
++    val availableDates: StateFlow<List<String>> = combine(
++        dayEntryRepository.getCurrentDateFlow(),
++        dayEntryRepository.getAllDatesFlow()
++    ) { todayStr, dbDates ->
++        buildAvailableDates(dbDates, todayStr)
++    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf(LocalDate.now().format(dateFormatter)))
++
++    private fun buildAvailableDates(dbDates: List<String>, todayStr: String): List<String> {
++        val today = LocalDate.parse(todayStr, dateFormatter)
++        if (dbDates.isEmpty()) return listOf(todayStr)
++        val parsed = dbDates.mapNotNull { runCatching { LocalDate.parse(it, dateFormatter) }.getOrNull() }
++        val minDate = parsed.minOrNull() ?: return listOf(todayStr)
++        val start = if (minDate.isAfter(today)) today else minDate
++        val result = mutableListOf<String>()
++        var d = start
++        while (!d.isAfter(today)) {
++            result.add(d.format(dateFormatter))
++            d = d.plusDays(1)
+         }
+-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), listOf(LocalDate.now().format(dateFormatter)))
++        return result
++    }
+ 
+     /** Записи о еде за выбранный день для отображения в средней плитке. */
+     val selectedDayEntries: StateFlow<List<DayEntry>> = _selectedDate
+@@ -123,6 +231,21 @@ class MainViewModel @Inject constructor(
+         }
+         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+ 
++    /** История ккал по дням за 7-дневное окно вокруг displayedDate [displayedDate-3 .. displayedDate+3]. Пропуски заполнены 0. */
++    val kcalHistoryWindow7Days: StateFlow<List<DayKcalPoint>> = displayedDate
++        .flatMapLatest { eff ->
++            val center = LocalDate.parse(eff, dateFormatter)
++            val start = center.minusDays(3)
++            val end = center.plusDays(3)
++            val startStr = start.format(dateFormatter)
++            val endStr = end.format(dateFormatter)
++            val allDates = (0..6).map { start.plusDays(it.toLong()) }.map { it.format(dateFormatter) }
++            dayEntryRepository.getKcalPerDayFlow(startStr, endStr).map { rawList ->
++                val byDate = rawList.associateBy { it.date }
++                allDates.map { d -> DayKcalPoint(d, byDate[d]?.kcal ?: 0) }
++            }
++        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
++
+     /** Статистика КБЖУ за выбранный день. Зависит от selectedDate. */
+     val kbjuData: StateFlow<KBJUData> = _selectedDate
+         .flatMapLatest { date ->
+@@ -131,9 +254,25 @@ class MainViewModel @Inject constructor(
+         }
+         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), KBJUData.default())
+ 
+-    /** Выбирает день для отображения на средней плитке. */
++    private val kcalChartYMaxStep = 250
++
++    /** Верхняя граница шкалы Y графика ккал: max(глобальный макс по дням, норма пользователя), округлённый вверх. */
++    val kcalChartYMax: StateFlow<Int> = combine(
++        dayEntryRepository.getGlobalMaxDailyKcalFlow(),
++        kbjuData
++    ) { globalMax, kbju ->
++        val normMax = kbju.maxCalories.coerceAtLeast(0)
++        val raw = maxOf(globalMax, normMax)
++        if (raw <= 0) 2000 else {
++            val step = kcalChartYMaxStep
++            ((raw + step - 1) / step) * step
++        }
++    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 2000)
++
++    /** Выбирает день для отображения на средней плитке. Сбрасывает превью. */
+     fun selectDay(date: String) {
+         _hasUserSelectedDate.value = true
++        _previewDate.value = null
+         _selectedDate.value = date
+     }
+ 
+@@ -141,13 +280,24 @@ class MainViewModel @Inject constructor(
+         viewModelScope.launch {
+             var hasInitializedDate = false
+             availableDates.collect { dates ->
+-                if (dates.isNotEmpty() && !hasInitializedDate) {
++                if (dates.isEmpty()) return@collect
++                if (!hasInitializedDate) {
+                     hasInitializedDate = true
+                     if (!_hasUserSelectedDate.value) {
+-                        val todayString = LocalDate.now().format(dateFormatter)
+-                        _selectedDate.value = todayString
++                        _selectedDate.value = dates.last()
+                     }
+                 }
++                val sel = _selectedDate.value
++                if (sel != null && sel !in dates) {
++                    _selectedDate.value = dates.last()
++                }
++            }
++        }
++        viewModelScope.launch {
++            displayedDate.collect { center ->
++                val c = LocalDate.parse(center, dateFormatter)
++                val windowDates = (0..6).map { c.minusDays(3).plusDays(it.toLong()).format(dateFormatter) }
++                warmCache(windowDates)
+             }
+         }
+     }
+@@ -302,7 +452,7 @@ class MainViewModel @Inject constructor(
+     // ══════════════════════════════════════════════════════════════════════════
+ 
+     /**
+-     * Заполняет БД тестовыми данными о еде за последние 5 дней.
++     * Заполняет БД тестовыми данными о еде за последние 7 дней.
+      * Используется для тестирования навигации по дням.
+      */
+     fun populateTestData() {
+@@ -330,7 +480,7 @@ class MainViewModel @Inject constructor(
+             )
+ 
+             val today = LocalDate.now()
+-            for (daysAgo in 0..4) {
++            for (daysAgo in 0..6) {
+                 val date = today.minusDays(daysAgo.toLong()).format(dateFormatter)
+                 // Выбираем 3-5 случайных блюд для каждого дня
+                 val dayFoods = testFoods.shuffled().take((3..5).random())
+@@ -341,7 +491,7 @@ class MainViewModel @Inject constructor(
+             _chatMessages.value = _chatMessages.value + ChatMessage(
+                 UUID.randomUUID().toString(),
+                 ChatRole.ASSISTANT,
+-                "🧪 Добавлены тестовые данные за 5 дней. Попробуйте свайпы на средней плитке!"
++                "🧪 Добавлены тестовые данные за 7 дней. Попробуйте свайпы на средней плитке!"
+             )
+         }
+     }

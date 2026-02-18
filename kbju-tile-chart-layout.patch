@@ -1,0 +1,21 @@
+diff --git a/app/src/main/java/com/example/vitanlyapp/ui/screen/main/KbjuTileContent.kt b/app/src/main/java/com/example/vitanlyapp/ui/screen/main/KbjuTileContent.kt
+--- a/app/src/main/java/com/example/vitanlyapp/ui/screen/main/KbjuTileContent.kt
++++ b/app/src/main/java/com/example/vitanlyapp/ui/screen/main/KbjuTileContent.kt
+@@ -151,11 +151,18 @@ fun KbjuTileContent(
+ 
+         val isExpanded = activeTile == TilePosition.TOP
+         val barsHeight = DesignTokens.barHeight * 5
++        val chartBottomInset = bottomBlockHeight + DesignTokens.tilePadding * 2
+ 
+         Column(
+             modifier = Modifier
+                 .fillMaxSize()
++                .zIndex(1f)
+                 .padding(horizontal = DesignTokens.tilePadding)
+                 .padding(top = barsTopInsetDp)
++                .then(
++                    if (isExpanded) Modifier.padding(bottom = chartBottomInset)
++                    else Modifier
++                )
+         ) {
+             KbjuBars(
